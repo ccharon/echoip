@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"log"
-
 	"os"
 
 	"github.com/mpolden/echoip/http"

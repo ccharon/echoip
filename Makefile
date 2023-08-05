@@ -1,5 +1,5 @@
 DOCKER ?= docker
-DOCKER_IMAGE ?= createleafcloud/echoip
+DOCKER_IMAGE ?= ccharon/echoip
 OS := $(shell uname)
 ifeq ($(OS),Linux)
 	TAR_OPTS := --wildcards
@@ -17,7 +17,7 @@ vet:
 	go vet ./...
 
 check-fmt:
-	bash -c "diff --line-format='%L' <(echo -n) <(gofmt -d -s .)"
+	bash -c "diff <(echo -n) <(gofumpt -d .)"
 
 lint: check-fmt vet
 

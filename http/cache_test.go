@@ -7,7 +7,7 @@ import (
 )
 
 func TestCacheCapacity(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		addCount, capacity, size int
 		evictions                uint64
 	}{

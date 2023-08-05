@@ -6,19 +6,17 @@ import (
 	"html/template"
 	"io/ioutil"
 	"log"
-	"path/filepath"
-	"strings"
-
+	"math/big"
+	"net"
+	"net/http"
 	"net/http/pprof"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/mpolden/echoip/iputil"
 	"github.com/mpolden/echoip/iputil/geo"
 	"github.com/mpolden/echoip/useragent"
-
-	"math/big"
-	"net"
-	"net/http"
-	"strconv"
 )
 
 const (
@@ -300,7 +298,7 @@ func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *app
 
 func (s *Server) cacheHandler(w http.ResponseWriter, r *http.Request) *appError {
 	cacheStats := s.cache.Stats()
-	var data = struct {
+	data := struct {
 		Size      int    `json:"size"`
 		Capacity  int    `json:"capacity"`
 		Evictions uint64 `json:"evictions"`
@@ -332,7 +330,7 @@ func (s *Server) DefaultHandler(w http.ResponseWriter, r *http.Request) *appErro
 		return internalServerError(err)
 	}
 
-	var data = struct {
+	data := struct {
 		Response
 		Host         string
 		BoxLatTop    float64
@@ -392,7 +390,7 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// When Content-Type for error is JSON, we need to marshal the response into JSON
 		if e.IsJSON() {
-			var data = struct {
+			data := struct {
 				Code  int    `json:"status"`
 				Error string `json:"error"`
 			}{e.Code, e.Message}

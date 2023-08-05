@@ -78,7 +78,7 @@ func TestCLIHandlers(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	s := httptest.NewServer(testServer().Handler())
 
-	var tests = []struct {
+	tests := []struct {
 		url             string
 		out             string
 		status          int
@@ -118,7 +118,7 @@ func TestDisabledHandlers(t *testing.T) {
 	server.gr, _ = geo.Open("", "", "")
 	s := httptest.NewServer(server.Handler())
 
-	var tests = []struct {
+	tests := []struct {
 		url    string
 		out    string
 		status int
@@ -148,7 +148,7 @@ func TestJSONHandlers(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	s := httptest.NewServer(testServer().Handler())
 
-	var tests = []struct {
+	tests := []struct {
 		url    string
 		out    string
 		status int
@@ -209,7 +209,7 @@ func TestCacheResizeHandler(t *testing.T) {
 }
 
 func TestIPFromRequest(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		remoteAddr     string
 		headerKey      string
 		headerValue    string
@@ -253,7 +253,7 @@ func TestCLIMatcher(t *testing.T) {
 	browserUserAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_4) " +
 		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.28 " +
 		"Safari/537.36"
-	var tests = []struct {
+	tests := []struct {
 		in  string
 		out bool
 	}{

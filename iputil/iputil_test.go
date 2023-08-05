@@ -7,10 +7,10 @@ import (
 )
 
 func TestToDecimal(t *testing.T) {
-	var msb = new(big.Int)
+	msb := new(big.Int)
 	msb, _ = msb.SetString("80000000000000000000000000000000", 16)
 
-	var tests = []struct {
+	tests := []struct {
 		in  string
 		out *big.Int
 	}{

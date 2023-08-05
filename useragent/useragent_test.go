@@ -5,7 +5,7 @@ import (
 )
 
 func TestParse(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		in  string
 		out UserAgent
 	}{
