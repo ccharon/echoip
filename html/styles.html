@@ -8,7 +8,6 @@
     font-family: "Monaco", "Menlo", "Consolas", "Courier New", monospace;
     white-space: pre-wrap; /* Since CSS 2.1 */
     white-space: -moz-pre-wrap; /* Mozilla, since 1999 */
-    white-space: -pre-wrap; /* Opera 4-6 */
     white-space: -o-pre-wrap; /* Opera 7 */
     word-wrap: break-word;
   }
@@ -102,11 +101,6 @@
     font-size: smaller;
   }
 
-  /* POST CORRECTION */
-  .leafcloud-logo .letters {
-    fill: black;
-  }
-
   /* DARK MODE OVERRIDES */
   @media (prefers-color-scheme: dark) {
     html,
@@ -154,27 +148,6 @@
 
     .pure-input::placeholder {
       color: #bbb;
-    }
-
-    .leafcloud-logo .letters {
-      fill: white;
-      max-width: 100%;
-    }
-  }
-
-  @media (min-width: 768px) {
-    .leafcloud-placement {
-      text-align: right;
-    }
-    .leafcloud-logo {
-      height: 80px;
-      margin: 2em 0 -0.5em 0;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .leafcloud-logo {
-      margin-right: 1em;
     }
   }
 
