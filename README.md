@@ -1,16 +1,68 @@
 # echoip
+Fork of https://github.com/leafcloudhq/echoip
 
-![Build Status](https://github.com/mpolden/echoip/workflows/ci/badge.svg)
+## Build the container
 
-A simple service for looking up your IP address. This is the code that powers
-https://ifconfig.co.
+before building this container you have to download your own geoip databases from maxmind.com. A free registration ist required.
+You will receive a license key which needs to be set as an environment variable, then execute the make target.
+
+```bash
+export GEOIP_LICENSE_KEY="your_license_key"
+make geoip-download
+```
+
+after that you can use docker build
+
+```bash
+make docker-build
+```
+
+## Run
+
+```bash
+docker run -d --name echoip -p 8080:8080 echoip
+```
+
+## Nginx configuration
+
+You can run this server with your own domain.
+
+```
+server {
+    listen 80;
+    listen [::]:80;
+    ...
+    location / {
+        if ($http_user_agent !~* (curl|wget)) {
+            return 301 https://$server_name$request_uri;
+        }
+        proxy_set_header  Host $host;
+		proxy_set_header  X-Real-IP $remote_addr;
+		proxy_set_header  X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header  X-Forwarded-Proto $scheme;
+		proxy_pass  http://localhost:8080;
+    }
+}
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    ssl_certificate /path/to/ssl/chain.pem; 
+    ssl_certificate_key /path/to/ssl/private.key;
+    ...
+    location / {
+        proxy_set_header  Host $host;
+		proxy_set_header  X-Real-IP $remote_addr;
+		proxy_set_header  X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header  X-Forwarded-Proto $scheme;
+		proxy_pass  http://localhost:8080;
+    }
+}
+```
 
 ## Usage
 
-Just the business, please:
-
 ```
-$ curl ifconfig.co
+$ curl ifconfig
 127.0.0.1
 
 $ http ifconfig.co
@@ -71,41 +123,6 @@ $ curl ifconfig.co/port/80
 Pass the appropriate flag (usually `-4` and `-6`) to your client to switch
 between IPv4 and IPv6 lookup.
 
-## Features
-
-* Easy to remember domain name
-* Fast
-* Supports IPv6
-* Supports HTTPS
-* Supports common command-line clients (e.g. `curl`, `httpie`, `ht`, `wget` and `fetch`)
-* JSON output
-* ASN, country and city lookup using the MaxMind GeoIP database
-* Port testing
-* All endpoints (except `/port`) can return information about a custom IP address specified via `?ip=` query parameter
-* Open source under the [BSD 3-Clause license](https://opensource.org/licenses/BSD-3-Clause)
-
-## Why?
-
-* To scratch an itch
-* An excuse to use Go for something
-* Faster than ifconfig.me and has IPv6 support
-
-## Building
-
-Compiling requires the [Golang compiler](https://golang.org/) to be installed.
-This package can be installed with:
-
-`go install github.com/mpolden/echoip/...@latest`
-
-For more information on building a Go project, see the [official Go
-documentation](https://golang.org/doc/code.html).
-
-## Docker image
-
-A Docker image is available on [Docker
-Hub](https://hub.docker.com/r/mpolden/echoip), which can be downloaded with:
-
-`docker pull mpolden/echoip`
 
 ### Usage
 
