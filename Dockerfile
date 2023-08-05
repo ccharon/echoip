@@ -13,6 +13,7 @@ EXPOSE 8080
 
 COPY --from=build /go/bin/echoip /opt/echoip/
 COPY html /opt/echoip/html
+COPY data /opt/echoip/data
 
 WORKDIR /opt/echoip
-ENTRYPOINT ["/opt/echoip/echoip"]
+ENTRYPOINT ["/opt/echoip/echoip", "-a", "/opt/echoip/data/asn.mmdb", "-c", "/opt/echoip/data/city.mmdb", "-f" ,"/opt/echoip/data/country.mmdb","-p", "-H", "X-Real-IP"]
