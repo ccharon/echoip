@@ -3,17 +3,19 @@ services:
   echoip:
     image: ccharon/echoip
     ports:
-      - 127.0.0.1:8080:8080
+      - 127.0.0.1:8082:8080
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 256M
-        reservations:
           cpus: "0.10"
           memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
     container_name: echoip
     restart: unless-stopped
+    volumes:
+      - /path/to/project/data:/data:ro
     networks:
       - internal
 
