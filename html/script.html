@@ -2,7 +2,7 @@
   let host = "{{ .Host }}";
   let jsonObj = "{{ .JSON }}";
   let data = JSON.parse(jsonObj);
-  let tool = "curl";
+  let tool = "curl -L";
   let commandBox, widgetBox, compositePath, commandStr;
   let path
   let ipQuery, portQuery
