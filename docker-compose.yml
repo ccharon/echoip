@@ -16,3 +16,6 @@ services:
     restart: unless-stopped
     networks:
       - internal
+
+networks:
+  internal: {}
