@@ -17,7 +17,7 @@ vet:
 	go vet ./...
 
 check-fmt:
-	bash -c "diff <(echo -n) <(gofumpt -d .)"
+	bash -c "diff --line-format='%L' <(echo -n) <(gofmt -d -s .)"
 
 lint: check-fmt vet
 
