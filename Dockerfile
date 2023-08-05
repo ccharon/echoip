@@ -1,6 +1,6 @@
 # Build
 FROM golang:1.20.7-bookworm AS build
-WORKDIR /go/src/github.com/mpolden/echoip
+WORKDIR /go/src/github.com/ccharon/echoip
 COPY . .
 
 # Must build without cgo because libc is unavailable in runtime image
