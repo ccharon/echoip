@@ -53,7 +53,7 @@ docker-login:
 	$(DOCKER) login --username "$(DOCKER_USERNAME)" --password "$(DOCKER_PASSWORD)"
 
 docker-test:
-	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --publish-all $(DOCKER_IMAGE)))
+	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)))
 	$(eval DOCKER_PORT=$(shell $(DOCKER) port $(CONTAINER) | cut -d ":" -f 2))
 	curl -fsS -m 5 localhost:$(DOCKER_PORT) > /dev/null; $(DOCKER) stop $(CONTAINER)
 
