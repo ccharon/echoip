@@ -78,42 +78,42 @@ You can run this server with your own domain.
 ## Usage
 
 ```
-$ curl ifconfig
+$ curl echoip.yoursite.com
 127.0.0.1
 
-$ http ifconfig.co
+$ http echoip.yoursite.com
 127.0.0.1
 
-$ wget -qO- ifconfig.co
+$ wget -qO- echoip.yoursite.com
 127.0.0.1
 
-$ fetch -qo- https://ifconfig.co
+$ fetch -qo- https://echoip.yoursite.com
 127.0.0.1
 
-$ bat -print=b ifconfig.co/ip
+$ bat -print=b echoip.yoursite.com/ip
 127.0.0.1
 ```
 
 Country and city lookup:
 
 ```
-$ curl ifconfig.co/country
+$ curl echoip.yoursite.com/country
 Elbonia
 
-$ curl ifconfig.co/country-iso
+$ curl echoip.yoursite.com/country-iso
 EB
 
-$ curl ifconfig.co/city
+$ curl echoip.yoursite.com/city
 Bornyasherk
 
-$ curl ifconfig.co/asn
+$ curl echoip.yoursite.com/asn
 AS59795
 ```
 
 As JSON:
 
 ```
-$ curl -H 'Accept: application/json' ifconfig.co  # or curl ifconfig.co/json
+$ curl -H 'Accept: application/json' echoip.yoursite.com  # or curl echoip.yoursite.com/json
 {
   "city": "Bornyasherk",
   "country": "Elbonia",
@@ -128,7 +128,7 @@ $ curl -H 'Accept: application/json' ifconfig.co  # or curl ifconfig.co/json
 Port testing:
 
 ```
-$ curl ifconfig.co/port/80
+$ curl echoip.yoursite.com/port/80
 {
   "ip": "127.0.0.1",
   "port": 80,
