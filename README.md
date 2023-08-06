@@ -1,13 +1,21 @@
 # echoip
 Fork of https://github.com/leafcloudhq/echoip
 
+- refreshed dependencies
+- added docker-compose.yml
+- added nginx config
+- modified docker image to run with geoip data
+- modified page layout
+
+![Screenshot](./doc/screenshot.jpg)
+
 ## Build the container
 
 ```bash
 make docker-build
 ```
 
-before running this container you have to download your own geoip databases from maxmind.com. A free registration ist required.
+before running this container you have to download your own geoip databases from [maxmind.com](https://www.maxmind.com). A free registration ist required.
 You will receive a license key which needs to be set as an environment variable, then execute the make target.
 
 ```bash
