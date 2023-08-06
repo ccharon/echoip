@@ -78,7 +78,7 @@ You can run this server with your own domain.
 ## Usage
 
 ```
-$ curl echoip.yoursite.com
+$ curl -L echoip.yoursite.com
 127.0.0.1
 
 $ http echoip.yoursite.com
