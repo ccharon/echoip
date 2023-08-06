@@ -97,23 +97,23 @@ $ bat -print=b echoip.yoursite.com/ip
 Country and city lookup:
 
 ```
-$ curl echoip.yoursite.com/country
+$ curl -L echoip.yoursite.com/country
 Elbonia
 
-$ curl echoip.yoursite.com/country-iso
+$ curl -L echoip.yoursite.com/country-iso
 EB
 
-$ curl echoip.yoursite.com/city
+$ curl -L echoip.yoursite.com/city
 Bornyasherk
 
-$ curl echoip.yoursite.com/asn
+$ curl -L echoip.yoursite.com/asn
 AS59795
 ```
 
 As JSON:
 
 ```
-$ curl -H 'Accept: application/json' echoip.yoursite.com  # or curl echoip.yoursite.com/json
+$ curl -L -H 'Accept: application/json' echoip.yoursite.com  # or curl -L echoip.yoursite.com/json
 {
   "city": "Bornyasherk",
   "country": "Elbonia",
@@ -128,7 +128,7 @@ $ curl -H 'Accept: application/json' echoip.yoursite.com  # or curl echoip.yours
 Port testing:
 
 ```
-$ curl echoip.yoursite.com/port/80
+$ curl -L echoip.yoursite.com/port/80
 {
   "ip": "127.0.0.1",
   "port": 80,
