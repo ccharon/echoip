@@ -15,7 +15,7 @@ services:
     container_name: echoip
     restart: unless-stopped
     volumes:
-      - /path/to/project/data:/data:ro
+      - ./data:/opt/echoip/data:ro
     networks:
       - internal
 
