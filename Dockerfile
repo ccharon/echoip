@@ -15,4 +15,4 @@ COPY --from=build /go/bin/echoip /opt/echoip/
 COPY html /opt/echoip/html
 
 WORKDIR /opt/echoip
-ENTRYPOINT ["/opt/echoip/echoip", "-a", "data/asn.mmdb", "-c", "data/city.mmdb","-p", "-H", "X-Real-IP"]
+ENTRYPOINT ["/opt/echoip/echoip", "-a", "data/GeoLite2-ASN.mmdb", "-c", "data/GeoLite2-City.mmdb","-p", "-H", "X-Real-IP"]

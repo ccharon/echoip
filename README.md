@@ -8,26 +8,40 @@ Fork of https://github.com/leafcloudhq/echoip
 - modified docker image to run with geoip data
 - modified page layout
 
-![Screenshot](./doc/screenshot.jpg)
-
-## Build the container
-
-```bash
-make docker-build
-```
-
-before running this container you have to download your own geoip databases from [maxmind.com](https://www.maxmind.com). A free registration ist required.
-You will receive a license key which needs to be set as an environment variable, then execute the make target.
-
-```bash
-export GEOIP_LICENSE_KEY="your_license_key"
-make geoip-download
-```
-
-be sure to mount the data directory containing the geoip databases into your docker image. see [docker-compose.yml](./docker-compose.yml)
+![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/doc/screenshot.jpg)
 
 ## Run
+Before running this container you have to download your own geoip databases from [maxmind.com](https://www.maxmind.com). A free registration ist required.
 
+The databases required are: GeoLite2-City.mmdb and GeoLite2-ASN.mmdb. Be sure to mount the data directory containing the geoip databases into your docker image.
+See the docker-compose.yml
+
+```yaml
+version: "3"
+services:
+  echoip:
+    image: ccharon/echoip
+    ports:
+      - "127.0.0.1:8082:8080"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+    container_name: echoip
+    restart: unless-stopped
+    volumes:
+      - ./data:/opt/echoip/data:ro
+    networks:
+      - internal
+
+networks:
+  internal: {}
+```
+to start run:
 ```bash
 docker compose up -d 
 ```
@@ -154,8 +168,6 @@ Usage of echoip:
     	Path to GeoIP ASN database
   -c string
     	Path to GeoIP city database
-  -f string
-    	Path to GeoIP country database
   -l string
     	Listening address (default ":8080")
   -p	Enable port lookup
