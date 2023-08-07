@@ -33,7 +33,6 @@ endif
 	mkdir -p data
 	@curl -fsSL -m 30 "https://download.maxmind.com/app/geoip_download?edition_id=$@&license_key=$(GEOIP_LICENSE_KEY)&suffix=tar.gz" | tar $(TAR_OPTS) --strip-components=1 -C $(CURDIR)/data -xzf - '*.mmdb'
 	test ! -f data/GeoLite2-City.mmdb || mv data/GeoLite2-City.mmdb data/city.mmdb
-	test ! -f data/GeoLite2-Country.mmdb || mv data/GeoLite2-Country.mmdb data/country.mmdb
 	test ! -f data/GeoLite2-ASN.mmdb || mv data/GeoLite2-ASN.mmdb data/asn.mmdb
 
 geoip-download: $(databases)
@@ -77,4 +76,4 @@ endif
 	@sha256sum $(GOPATH)/bin/$(XBIN)
 
 run:
-	go run cmd/echoip/main.go -a data/asn.mmdb -c data/city.mmdb -f data/country.mmdb -H x-forwarded-for -r -p
+	go run cmd/echoip/main.go -a data/asn.mmdb -c data/city.mmdb -H x-forwarded-for -r -p

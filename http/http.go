@@ -125,30 +125,34 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+
 	response, ok := s.cache.Get(ip)
 	if ok {
 		// Do not cache user agent
 		response.UserAgent = userAgentFromRequest(r)
 		return response, nil
 	}
+
 	ipDecimal := iputil.ToDecimal(ip)
-	country, _ := s.gr.Country(ip)
 	city, _ := s.gr.City(ip)
 	asn, _ := s.gr.ASN(ip)
+
 	var hostname string
 	if s.LookupAddr != nil {
 		hostname, _ = s.LookupAddr(ip)
 	}
+
 	var autonomousSystemNumber string
 	if asn.AutonomousSystemNumber > 0 {
 		autonomousSystemNumber = fmt.Sprintf("AS%d", asn.AutonomousSystemNumber)
 	}
+
 	response = Response{
 		IP:         ip,
 		IPDecimal:  ipDecimal,
-		Country:    country.Name,
-		CountryISO: country.ISO,
-		CountryEU:  country.IsEU,
+		Country:    city.CountryName,
+		CountryISO: city.CountryISO,
+		CountryEU:  city.CountryIsEU,
 		RegionName: city.RegionName,
 		RegionCode: city.RegionCode,
 		MetroCode:  city.MetroCode,
@@ -161,22 +165,28 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 		ASNOrg:     asn.AutonomousSystemOrganization,
 		Hostname:   hostname,
 	}
+
 	s.cache.Set(ip, response)
 	response.UserAgent = userAgentFromRequest(r)
+
 	return response, nil
 }
 
 func (s *Server) newPortResponse(r *http.Request) (PortResponse, error) {
 	lastElement := filepath.Base(r.URL.Path)
+
 	port, err := strconv.ParseUint(lastElement, 10, 16)
 	if err != nil || port < 1 || port > 65535 {
 		return PortResponse{Port: port}, fmt.Errorf("invalid port: %s", lastElement)
 	}
+
 	ip, err := ipFromRequest(s.IPHeaders, r, false)
 	if err != nil {
 		return PortResponse{Port: port}, err
 	}
+
 	err = s.LookupPort(ip, port)
+
 	return PortResponse{
 		IP:        ip,
 		Port:      port,
@@ -184,16 +194,18 @@ func (s *Server) newPortResponse(r *http.Request) (PortResponse, error) {
 	}, nil
 }
 
-func (s *Server) CLIHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) CLIHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	ip, err := ipFromRequest(s.IPHeaders, r, true)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
+
 	fmt.Fprintln(w, ip.String())
+
 	return nil
 }
 
-func (s *Server) CLICountryHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) CLICountryHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
@@ -202,7 +214,7 @@ func (s *Server) CLICountryHandler(w http.ResponseWriter, r *http.Request) *appE
 	return nil
 }
 
-func (s *Server) CLICountryISOHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) CLICountryISOHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
@@ -211,7 +223,7 @@ func (s *Server) CLICountryISOHandler(w http.ResponseWriter, r *http.Request) *a
 	return nil
 }
 
-func (s *Server) CLICityHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) CLICityHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
@@ -220,7 +232,7 @@ func (s *Server) CLICityHandler(w http.ResponseWriter, r *http.Request) *appErro
 	return nil
 }
 
-func (s *Server) CLICoordinatesHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) CLICoordinatesHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
@@ -229,7 +241,7 @@ func (s *Server) CLICoordinatesHandler(w http.ResponseWriter, r *http.Request) *
 	return nil
 }
 
-func (s *Server) CLIASNHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) CLIASNHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
@@ -238,7 +250,7 @@ func (s *Server) CLIASNHandler(w http.ResponseWriter, r *http.Request) *appError
 	return nil
 }
 
-func (s *Server) JSONHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) JSONHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
@@ -252,13 +264,13 @@ func (s *Server) JSONHandler(w http.ResponseWriter, r *http.Request) *appError {
 	return nil
 }
 
-func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	w.Header().Set("Content-Type", jsonMediaType)
 	w.Write([]byte(`{"status":"OK"}`))
 	return nil
 }
 
-func (s *Server) PortHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) PortHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newPortResponse(r)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
@@ -272,7 +284,7 @@ func (s *Server) PortHandler(w http.ResponseWriter, r *http.Request) *appError {
 	return nil
 }
 
-func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
@@ -296,7 +308,7 @@ func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *app
 	return nil
 }
 
-func (s *Server) cacheHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) cacheHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	cacheStats := s.cache.Stats()
 	data := struct {
 		Size      int    `json:"size"`
@@ -316,15 +328,17 @@ func (s *Server) cacheHandler(w http.ResponseWriter, r *http.Request) *appError 
 	return nil
 }
 
-func (s *Server) DefaultHandler(w http.ResponseWriter, r *http.Request) *appError {
+func (s *Server) DefaultHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error())
 	}
+
 	t, err := template.ParseGlob(s.Template + "/*")
 	if err != nil {
 		return internalServerError(err)
 	}
+
 	json, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return internalServerError(err)
@@ -357,7 +371,7 @@ func (s *Server) DefaultHandler(w http.ResponseWriter, r *http.Request) *appErro
 	return nil
 }
 
-func NotFoundHandler(w http.ResponseWriter, r *http.Request) *appError {
+func NotFoundHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	err := notFound(nil).WithMessage("404 page not found")
 	if r.Header.Get("accept") == jsonMediaType {
 		err = err.AsJSON()
@@ -374,10 +388,10 @@ func cliMatcher(r *http.Request) bool {
 	return false
 }
 
-type appHandler func(http.ResponseWriter, *http.Request) *appError
+type appHandler func(http.ResponseWriter, *http.Request) *AppError
 
 func wrapHandlerFunc(f http.HandlerFunc) appHandler {
-	return func(w http.ResponseWriter, r *http.Request) *appError {
+	return func(w http.ResponseWriter, r *http.Request) *AppError {
 		f.ServeHTTP(w, r)
 		return nil
 	}

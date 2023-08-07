@@ -18,12 +18,8 @@ func lookupPort(net.IP, uint64) error   { return nil }
 
 type testDb struct{}
 
-func (t *testDb) Country(net.IP) (geo.Country, error) {
-	return geo.Country{Name: "Elbonia", ISO: "EB", IsEU: new(bool)}, nil
-}
-
 func (t *testDb) City(net.IP) (geo.City, error) {
-	return geo.City{Name: "Bornyasherk", RegionName: "North Elbonia", RegionCode: "1234", MetroCode: 1234, PostalCode: "1234", Latitude: 63.416667, Longitude: 10.416667, Timezone: "Europe/Bornyasherk"}, nil
+	return geo.City{Name: "Bornyasherk", RegionName: "North Elbonia", RegionCode: "1234", MetroCode: 1234, PostalCode: "1234", Latitude: 63.416667, Longitude: 10.416667, Timezone: "Europe/Bornyasherk", CountryName: "Elbonia", CountryISO: "EB", CountryIsEU: new(bool)}, nil
 }
 
 func (t *testDb) ASN(net.IP) (geo.ASN, error) {
@@ -115,7 +111,7 @@ func TestDisabledHandlers(t *testing.T) {
 	server := testServer()
 	server.LookupPort = nil
 	server.LookupAddr = nil
-	server.gr, _ = geo.Open("", "", "")
+	server.gr, _ = geo.Open("", "")
 	s := httptest.NewServer(server.Handler())
 
 	tests := []struct {

@@ -2,6 +2,7 @@
 Fork of https://github.com/leafcloudhq/echoip
 
 - refreshed dependencies
+- removed country.mmdb as this information is also in city.mmdb
 - added docker-compose.yml
 - added nginx config
 - modified docker image to run with geoip data

@@ -38,7 +38,7 @@ func (r *router) RoutePrefix(method, path string, handler appHandler) *route {
 }
 
 func (r *router) Handler() http.Handler {
-	return appHandler(func(w http.ResponseWriter, req *http.Request) *appError {
+	return appHandler(func(w http.ResponseWriter, req *http.Request) *AppError {
 		for _, route := range r.routes {
 			if route.match(req) {
 				return route.handler(w, req)
