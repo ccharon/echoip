@@ -294,9 +294,9 @@ func (s *Server) JSONHandler(w http.ResponseWriter, r *http.Request) *AppError {
 
 func (s *Server) HealthHandler(w http.ResponseWriter, _ *http.Request) *AppError {
 	w.Header().Set("Content-Type", jsonMediaType)
-	write, err := w.Write([]byte(`{"status":"OK"}`))
-	if err != nil {
-		return nil
+
+	if _, err := w.Write([]byte(`{"status":"OK"}`)); err != nil {
+		log.Printf("Write failed: %v", err)
 	}
 
 	return nil
@@ -304,6 +304,7 @@ func (s *Server) HealthHandler(w http.ResponseWriter, _ *http.Request) *AppError
 
 func (s *Server) PortHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newPortResponse(r)
+
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
