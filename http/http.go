@@ -253,7 +253,7 @@ func (s *Server) CLICoordinatesHandler(w http.ResponseWriter, r *http.Request) *
 	}
 
 	if _, err := fmt.Fprintf(w, "%s,%s\n", formatCoordinate(response.Latitude), formatCoordinate(response.Longitude)); err != nil {
-		log.Printf("Fprintln failed: %v", err)
+		log.Printf("Fprintf failed: %v", err)
 	}
 
 	return nil
@@ -266,7 +266,7 @@ func (s *Server) CLIASNHandler(w http.ResponseWriter, r *http.Request) *AppError
 	}
 
 	if _, err := fmt.Fprintf(w, "%s\n", response.ASN); err != nil {
-		log.Printf("Fprintln failed: %v", err)
+		log.Printf("Fprintf failed: %v", err)
 	}
 
 	return nil
@@ -475,7 +475,7 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(e.Code)
 
 		if _, err := fmt.Fprint(w, e.Message); err != nil {
-			log.Printf("Fprintln failed: %v", err)
+			log.Printf("Fprint failed: %v", err)
 		}
 	}
 }
