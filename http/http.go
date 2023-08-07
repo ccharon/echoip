@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io/ioutil"
+	"io"
 	"log"
 	"math/big"
 	"net"
@@ -255,18 +255,22 @@ func (s *Server) JSONHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
+
 	b, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return internalServerError(err).AsJSON()
 	}
+
 	w.Header().Set("Content-Type", jsonMediaType)
 	w.Write(b)
+
 	return nil
 }
 
-func (s *Server) HealthHandler(w http.ResponseWriter, r *http.Request) *AppError {
+func (s *Server) HealthHandler(w http.ResponseWriter, _ *http.Request) *AppError {
 	w.Header().Set("Content-Type", jsonMediaType)
 	w.Write([]byte(`{"status":"OK"}`))
+
 	return nil
 }
 
@@ -275,40 +279,49 @@ func (s *Server) PortHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
+
 	b, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return internalServerError(err).AsJSON()
 	}
+
 	w.Header().Set("Content-Type", jsonMediaType)
 	w.Write(b)
+
 	return nil
 }
 
 func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *AppError {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
+
 	capacity, err := strconv.Atoi(string(body))
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
+
 	if err := s.cache.Resize(capacity); err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
+
 	data := struct {
 		Message string `json:"message"`
 	}{fmt.Sprintf("Changed cache capacity to %d.", capacity)}
+
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return internalServerError(err).AsJSON()
 	}
+
 	w.Header().Set("Content-Type", jsonMediaType)
 	w.Write(b)
+
 	return nil
 }
 
-func (s *Server) cacheHandler(w http.ResponseWriter, r *http.Request) *AppError {
+func (s *Server) cacheHandler(w http.ResponseWriter, _ *http.Request) *AppError {
 	cacheStats := s.cache.Stats()
 	data := struct {
 		Size      int    `json:"size"`
@@ -319,12 +332,15 @@ func (s *Server) cacheHandler(w http.ResponseWriter, r *http.Request) *AppError 
 		cacheStats.Capacity,
 		cacheStats.Evictions,
 	}
+
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return internalServerError(err).AsJSON()
 	}
+
 	w.Header().Set("Content-Type", jsonMediaType)
 	w.Write(b)
+
 	return nil
 }
 
@@ -339,7 +355,7 @@ func (s *Server) DefaultHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		return internalServerError(err)
 	}
 
-	json, err := json.MarshalIndent(response, "", "  ")
+	jsonData, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return internalServerError(err)
 	}
@@ -361,7 +377,7 @@ func (s *Server) DefaultHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		response.Latitude - 0.05,
 		response.Longitude - 0.05,
 		response.Longitude + 0.05,
-		string(json),
+		string(jsonData),
 		s.LookupPort != nil,
 		s.Sponsor,
 	}
@@ -371,7 +387,7 @@ func (s *Server) DefaultHandler(w http.ResponseWriter, r *http.Request) *AppErro
 	return nil
 }
 
-func NotFoundHandler(w http.ResponseWriter, r *http.Request) *AppError {
+func NotFoundHandler(_ http.ResponseWriter, r *http.Request) *AppError {
 	err := notFound(nil).WithMessage("404 page not found")
 	if r.Header.Get("accept") == jsonMediaType {
 		err = err.AsJSON()

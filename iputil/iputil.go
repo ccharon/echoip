@@ -19,11 +19,16 @@ func LookupAddr(ip net.IP) (string, error) {
 
 func LookupPort(ip net.IP, port uint64) error {
 	address := fmt.Sprintf("[%s]:%d", ip, port)
+
 	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+
+	defer func(conn net.Conn) {
+		_ = conn.Close()
+	}(conn)
+
 	return nil
 }
 

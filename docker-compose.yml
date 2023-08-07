@@ -3,7 +3,7 @@ services:
   echoip:
     image: ccharon/echoip
     ports:
-      - 127.0.0.1:8082:8080
+      - "127.0.0.1:8082:8080"
     deploy:
       resources:
         limits:

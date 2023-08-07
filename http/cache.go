@@ -36,6 +36,7 @@ func NewCache(capacity int) *Cache {
 func key(ip net.IP) uint64 {
 	h := fnv.New64a()
 	h.Write(ip)
+
 	return h.Sum64()
 }
 

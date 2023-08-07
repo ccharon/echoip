@@ -1,7 +1,7 @@
 package http
 
 import (
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -41,15 +41,21 @@ func httpGet(url string, acceptMediaType string, userAgent string) (string, int,
 		r.Header.Set("Accept", acceptMediaType)
 	}
 	r.Header.Set("User-Agent", userAgent)
+
 	res, err := http.DefaultClient.Do(r)
 	if err != nil {
 		return "", 0, err
 	}
-	defer res.Body.Close()
-	data, err := ioutil.ReadAll(res.Body)
+
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(res.Body)
+
+	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return "", 0, err
 	}
+
 	return string(data), res.StatusCode, nil
 }
 
@@ -58,20 +64,26 @@ func httpPost(url, body string) (*http.Response, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+
 	res, err := http.DefaultClient.Do(r)
 	if err != nil {
 		return nil, "", err
 	}
-	defer res.Body.Close()
-	data, err := ioutil.ReadAll(res.Body)
+
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(res.Body)
+
+	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, "", err
 	}
+
 	return res, string(data), nil
 }
 
 func TestCLIHandlers(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	s := httptest.NewServer(testServer().Handler())
 
 	tests := []struct {
@@ -107,7 +119,7 @@ func TestCLIHandlers(t *testing.T) {
 }
 
 func TestDisabledHandlers(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	server := testServer()
 	server.LookupPort = nil
 	server.LookupAddr = nil
@@ -141,7 +153,7 @@ func TestDisabledHandlers(t *testing.T) {
 }
 
 func TestJSONHandlers(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	s := httptest.NewServer(testServer().Handler())
 
 	tests := []struct {
@@ -175,7 +187,7 @@ func TestJSONHandlers(t *testing.T) {
 }
 
 func TestCacheHandler(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	srv := testServer()
 	srv.profile = true
 	s := httptest.NewServer(srv.Handler())
@@ -190,7 +202,7 @@ func TestCacheHandler(t *testing.T) {
 }
 
 func TestCacheResizeHandler(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	srv := testServer()
 	srv.profile = true
 	s := httptest.NewServer(srv.Handler())

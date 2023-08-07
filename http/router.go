@@ -5,11 +5,11 @@ import (
 	"strings"
 )
 
-type router struct {
-	routes []*route
+type Router struct {
+	routes []*Route
 }
 
-type route struct {
+type Route struct {
 	method      string
 	path        string
 	prefix      bool
@@ -17,12 +17,12 @@ type route struct {
 	matcherFunc func(*http.Request) bool
 }
 
-func NewRouter() *router {
-	return &router{}
+func NewRouter() *Router {
+	return &Router{}
 }
 
-func (r *router) Route(method, path string, handler appHandler) *route {
-	route := route{
+func (r *Router) Route(method, path string, handler appHandler) *Route {
+	route := Route{
 		method:  method,
 		path:    path,
 		handler: handler,
@@ -31,13 +31,13 @@ func (r *router) Route(method, path string, handler appHandler) *route {
 	return &route
 }
 
-func (r *router) RoutePrefix(method, path string, handler appHandler) *route {
+func (r *Router) RoutePrefix(method, path string, handler appHandler) *Route {
 	route := r.Route(method, path, handler)
 	route.prefix = true
 	return route
 }
 
-func (r *router) Handler() http.Handler {
+func (r *Router) Handler() http.Handler {
 	return appHandler(func(w http.ResponseWriter, req *http.Request) *AppError {
 		for _, route := range r.routes {
 			if route.match(req) {
@@ -48,17 +48,17 @@ func (r *router) Handler() http.Handler {
 	})
 }
 
-func (r *route) Header(header, value string) {
+func (r *Route) Header(header, value string) {
 	r.MatcherFunc(func(req *http.Request) bool {
 		return req.Header.Get(header) == value
 	})
 }
 
-func (r *route) MatcherFunc(f func(*http.Request) bool) {
+func (r *Route) MatcherFunc(f func(*http.Request) bool) {
 	r.matcherFunc = f
 }
 
-func (r *route) match(req *http.Request) bool {
+func (r *Route) match(req *http.Request) bool {
 	if req.Method != r.method {
 		return false
 	}
