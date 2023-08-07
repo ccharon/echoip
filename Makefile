@@ -24,7 +24,7 @@ lint: check-fmt vet
 install:
 	go install ./...
 
-databases := GeoLite2-City GeoLite2-Country GeoLite2-ASN
+databases := GeoLite2-City GeoLite2-ASN
 
 $(databases):
 ifndef GEOIP_LICENSE_KEY
