@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"net"
 	"sync"
 )
@@ -35,7 +36,10 @@ func NewCache(capacity int) *Cache {
 
 func key(ip net.IP) uint64 {
 	h := fnv.New64a()
-	h.Write(ip)
+
+	if _, err := h.Write(ip); err != nil {
+		log.Printf("Write failed: %v", err)
+	}
 
 	return h.Sum64()
 }

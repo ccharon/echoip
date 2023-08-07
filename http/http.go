@@ -200,7 +200,9 @@ func (s *Server) CLIHandler(w http.ResponseWriter, r *http.Request) *AppError {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
 
-	fmt.Fprintln(w, ip.String())
+	if _, err := fmt.Fprintln(w, ip.String()); err != nil {
+		log.Printf("Fprintln failed: %v", err)
+	}
 
 	return nil
 }
@@ -210,7 +212,11 @@ func (s *Server) CLICountryHandler(w http.ResponseWriter, r *http.Request) *AppE
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
-	fmt.Fprintln(w, response.Country)
+
+	if _, err := fmt.Fprintln(w, response.Country); err != nil {
+		log.Printf("Fprintln failed: %v", err)
+	}
+
 	return nil
 }
 
@@ -219,7 +225,11 @@ func (s *Server) CLICountryISOHandler(w http.ResponseWriter, r *http.Request) *A
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
-	fmt.Fprintln(w, response.CountryISO)
+
+	if _, err := fmt.Fprintln(w, response.CountryISO); err != nil {
+		log.Printf("Fprintln failed: %v", err)
+	}
+
 	return nil
 }
 
@@ -228,7 +238,11 @@ func (s *Server) CLICityHandler(w http.ResponseWriter, r *http.Request) *AppErro
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
-	fmt.Fprintln(w, response.City)
+
+	if _, err := fmt.Fprintln(w, response.City); err != nil {
+		log.Printf("Fprintln failed: %v", err)
+	}
+
 	return nil
 }
 
@@ -237,7 +251,11 @@ func (s *Server) CLICoordinatesHandler(w http.ResponseWriter, r *http.Request) *
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
-	fmt.Fprintf(w, "%s,%s\n", formatCoordinate(response.Latitude), formatCoordinate(response.Longitude))
+
+	if _, err := fmt.Fprintf(w, "%s,%s\n", formatCoordinate(response.Latitude), formatCoordinate(response.Longitude)); err != nil {
+		log.Printf("Fprintln failed: %v", err)
+	}
+
 	return nil
 }
 
@@ -246,7 +264,11 @@ func (s *Server) CLIASNHandler(w http.ResponseWriter, r *http.Request) *AppError
 	if err != nil {
 		return badRequest(err).WithMessage(err.Error()).AsJSON()
 	}
-	fmt.Fprintf(w, "%s\n", response.ASN)
+
+	if _, err := fmt.Fprintf(w, "%s\n", response.ASN); err != nil {
+		log.Printf("Fprintln failed: %v", err)
+	}
+
 	return nil
 }
 
@@ -262,14 +284,20 @@ func (s *Server) JSONHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	}
 
 	w.Header().Set("Content-Type", jsonMediaType)
-	w.Write(b)
+
+	if _, err := w.Write(b); err != nil {
+		log.Printf("Write failed: %v", err)
+	}
 
 	return nil
 }
 
 func (s *Server) HealthHandler(w http.ResponseWriter, _ *http.Request) *AppError {
 	w.Header().Set("Content-Type", jsonMediaType)
-	w.Write([]byte(`{"status":"OK"}`))
+	write, err := w.Write([]byte(`{"status":"OK"}`))
+	if err != nil {
+		return nil
+	}
 
 	return nil
 }
@@ -286,7 +314,10 @@ func (s *Server) PortHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	}
 
 	w.Header().Set("Content-Type", jsonMediaType)
-	w.Write(b)
+
+	if _, err := w.Write(b); err != nil {
+		log.Printf("Write failed: %v", err)
+	}
 
 	return nil
 }
@@ -316,7 +347,10 @@ func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *App
 	}
 
 	w.Header().Set("Content-Type", jsonMediaType)
-	w.Write(b)
+
+	if _, err := w.Write(b); err != nil {
+		log.Printf("Write failed: %v", err)
+	}
 
 	return nil
 }
@@ -339,7 +373,10 @@ func (s *Server) cacheHandler(w http.ResponseWriter, _ *http.Request) *AppError 
 	}
 
 	w.Header().Set("Content-Type", jsonMediaType)
-	w.Write(b)
+
+	if _, err := w.Write(b); err != nil {
+		log.Printf("Write failed: %v", err)
+	}
 
 	return nil
 }
@@ -435,7 +472,10 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", e.ContentType)
 		}
 		w.WriteHeader(e.Code)
-		fmt.Fprint(w, e.Message)
+
+		if _, err := fmt.Fprint(w, e.Message); err != nil {
+			log.Printf("Fprintln failed: %v", err)
+		}
 	}
 }
 
