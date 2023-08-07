@@ -1,4 +1,10 @@
 # echoip
+![Build Status](https://github.com/ccharon/echoip/workflows/ci/badge.svg)
+[![Docker pulls](https://img.shields.io/docker/pulls/ccharon/echoip.svg?label=docker+pulls)](https://hub.docker.com/r/ccharon/echoip)
+[![Docker stars](https://img.shields.io/docker/stars/ccharon/echoip.svg?label=docker+stars)](https://hub.docker.com/r/ccharon/echoip)
+
+
+
 Fork of https://github.com/leafcloudhq/echoip
 
 - refreshed dependencies
