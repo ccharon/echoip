@@ -38,4 +38,4 @@ jobs:
       
       - name: Trigger deployment
         run: |
-          curl -X POST ${{ secrets.WEBHOOK_URL }} -H "Content-Type: application/json" -d '{"id": "${{ env.GITHUB_RUN_ID }}", "image": "${{ env.DOCKER_IMAGE }}", "token": "${{ secrets.WEBHOOK_TOKEN }}"}'
+          curl -X POST ${{ secrets.WEBHOOK_URL }} -H "Content-Type: application/json" -d '{"id": "${GITHUB_RUN_ID}", "image": "${{ env.DOCKER_IMAGE }}", "token": "${{ secrets.WEBHOOK_TOKEN }}"}'
