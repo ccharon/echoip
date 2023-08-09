@@ -34,5 +34,4 @@ jobs:
       
       - name: Trigger deployment
         run: |
-          response = $(curl -X POST https://webhook.erdferkel.eu -H "Content-Type: application/json" -d '{"id": "${{ vars.GITHUB_RUN_ID }}", "image": "ccharon/echoip", "token": "${{ secrets.WEBHOOK_TOKEN }}"}')
-          echo "response from curl= $response"
+          curl -X POST https://webhook.erdferkel.eu -H "Content-Type: application/json" -d '{"id": "${{ vars.GITHUB_RUN_ID }}", "image": "ccharon/echoip", "token": "${{ secrets.WEBHOOK_TOKEN }}"}'
