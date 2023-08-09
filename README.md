@@ -115,7 +115,7 @@ $ bat -print=b echoip.yoursite.com/ip
 127.0.0.1
 ```
 
-Country and city lookup:
+### Country and city lookup:
 
 ```
 $ curl -L echoip.yoursite.com/country
@@ -131,7 +131,7 @@ $ curl -L echoip.yoursite.com/asn
 AS59795
 ```
 
-As JSON:
+### As JSON:
 
 ```
 $ curl -L -H 'Accept: application/json' echoip.yoursite.com  # or curl -L echoip.yoursite.com/json
@@ -146,7 +146,7 @@ $ curl -L -H 'Accept: application/json' echoip.yoursite.com  # or curl -L echoip
 }
 ```
 
-Port testing:
+### Port testing:
 
 ```
 $ curl -L echoip.yoursite.com/port/80
