@@ -40,8 +40,21 @@ services:
       - "127.0.0.1:8082:8080"
     environment:
       GEOIP_LICENSE_KEY: ${GEOIP_LICENSE_KEY:?set GEOIP_LICENSE_KEY in .env}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 128M
     container_name: echoip
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - geodata:/opt/echoip/data
     networks:
@@ -84,25 +97,22 @@ without a restart.
 ## Refresh interval
 
 MaxMind rebuilds GeoLite2 twice a week. `-u` defaults to `24h`, so the data is
-at most a day behind the source. The two week interval this project used before
-left it up to two weeks behind.
+at most a day behind the source.
 
-Checking that often costs nothing while the edition is unchanged, because the
+Checking daily costs nothing while the edition is unchanged, because the
 request is conditional. The server sends `If-Modified-Since` with the
 modification time of the file it holds, and MaxMind answers `304` with an empty
 body until it has rebuilt that edition. Data is transferred about twice a week,
-roughly 80 MB for both editions, which is what the long interval used to save.
+roughly 80 MB for both editions.
 
-Two consequences follow from that. The modification time on disk means "last
-confirmed current" rather than "last downloaded", because a `304` updates it,
-and that is what moves the next check a full interval away. An unchanged
-database also triggers no reload, so the response cache survives a check that
-brought nothing new.
+The modification time on disk therefore means "last confirmed current", since a
+`304` updates it as well, and that is what moves the next check a full interval
+away. An unchanged database triggers no reload, so the response cache survives
+a check that brought nothing new.
 
 ## Security
 
-The service answers unauthenticated requests from anyone, so the surface it
-offers is what matters.
+The service answers unauthenticated requests from anyone.
 
 | Measure | Effect |
 | --- | --- |
@@ -122,24 +132,17 @@ them only for headers the proxy in front of the service overwrites, otherwise a
 caller can choose the address they are shown data for. That address is only
 looked up, never contacted.
 
-`make vulncheck` runs govulncheck, which CI runs before it builds the image.
-It fails the build when a known vulnerability is reachable from this code. One
-that sits in a dependency nothing here calls is reported without failing, since
-it cannot be triggered.
+`make vulncheck` runs govulncheck, which CI runs before it builds the image. It
+fails the build when a known vulnerability is reachable from this code. One
+that sits in a dependency nothing here calls is reported without failing.
 
-The Go vulnerability database carries no severity or attack vector, so "remote
-exploitable" cannot be selected for. Reachability is the stronger filter here
-anyway: everything this service can reach from a request is reachable by
-whoever sends the request.
-
-Requests are not rate limited by the service itself. The nginx configuration
-below does it, which is where it belongs.
+Rate limiting is left to the proxy. The nginx configuration below sets it.
 
 ## Nginx configuration
 
 The service speaks plain HTTP and binds to localhost, so it needs a proxy in
 front of it for TLS. The proxy also decides which address the service reports,
-because it is the one that sets the trusted header.
+because it sets the trusted header.
 
 ```nginx
 # Rate limits. A page view and a CLI answer are cheap, a reverse lookup for an
@@ -222,16 +225,17 @@ server {
 }
 ```
 
-The rate limit protects the one expensive path. A page view is served from
-memory, but the reverse lookup for an address that is not in the cache waits
-on DNS, up to two seconds when there is no PTR record. Ten requests per second
-with a burst of twenty is far above what a browser or a CLI client does, and
-`/health` is left out so monitoring is never throttled. A client over the limit
-gets `429`.
+The rate limit covers the one expensive path. A page view is served from
+memory, while a reverse lookup for an address outside the cache waits on DNS,
+up to two seconds when there is no PTR record. Ten requests per second with a
+burst of twenty is far above what a browser or a CLI client does. `/health` is
+exempt so that monitoring is never throttled, and a client over the limit gets
+`429`.
 
-`proxy_set_header X-Real-IP $remote_addr` is what makes the reported address
-trustworthy: it replaces whatever the caller sent. Keep the service bound to
-localhost, otherwise a caller can reach it directly and pick their own address.
+`proxy_set_header X-Real-IP $remote_addr` replaces whatever the caller sent,
+which is what makes the reported address trustworthy. Keep the service bound to
+localhost, otherwise a caller can reach it directly and pick their own
+address.
 
 ## Usage
 
