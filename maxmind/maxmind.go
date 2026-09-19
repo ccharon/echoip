@@ -29,11 +29,11 @@ const (
 )
 
 // Overridden in tests.
-var downloadURL = "https://download.maxmind.com/app/geoip_download"
+var downloadURL = "https://download.maxmind.com/geoip/databases"
 
-// The license key rides in the query string, which a redirect carries along,
-// so a hop that leaves the scheme of the first request would send it in the
-// clear.
+// Credentials and the signed URL a redirect leads to have no business on a
+// plain connection, so a hop that leaves the scheme of the first request is
+// refused.
 var client = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= maxRedirects {
@@ -65,6 +65,8 @@ const (
 )
 
 type Updater struct {
+	// AccountID and LicenseKey authenticate the download.
+	AccountID  string
 	LicenseKey string
 	// Databases maps a GeoLite2 edition ID to the file it is written to.
 	Databases map[string]string
@@ -74,7 +76,7 @@ type Updater struct {
 
 // Enabled reports whether this updater has everything it needs to download.
 func (u *Updater) Enabled() bool {
-	return u.LicenseKey != "" && u.Interval > 0 && len(u.Databases) > 0
+	return u.AccountID != "" && u.LicenseKey != "" && u.Interval > 0 && len(u.Databases) > 0
 }
 
 // Stale reports whether any database is missing or older than Interval.
@@ -177,13 +179,7 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	params := url.Values{
-		"edition_id":  {edition},
-		"license_key": {u.LicenseKey},
-		"suffix":      {"tar.gz"},
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL+"?"+params.Encode(), nil)
+	req, err := u.request(ctx, edition, "tar.gz")
 	if err != nil {
 		return false, withoutURL(err)
 	}
@@ -231,16 +227,25 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 	return true, os.Rename(tmp, path)
 }
 
+// request builds an authenticated GET for one file of an edition. The
+// credentials go in a header, so they stay out of the URL a log or an error
+// might carry.
+func (u *Updater) request(ctx context.Context, edition, suffix string) (*http.Request, error) {
+	target := downloadURL + "/" + url.PathEscape(edition) + "/download?suffix=" + url.QueryEscape(suffix)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(u.AccountID, u.LicenseKey)
+
+	return req, nil
+}
+
 // verify compares the archive against the checksum MaxMind publishes beside
 // it.
 func (u *Updater) verify(ctx context.Context, edition string, sum []byte) error {
-	params := url.Values{
-		"edition_id":  {edition},
-		"license_key": {u.LicenseKey},
-		"suffix":      {"tar.gz.sha256"},
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL+"?"+params.Encode(), nil)
+	req, err := u.request(ctx, edition, "tar.gz.sha256")
 	if err != nil {
 		return withoutURL(err)
 	}
