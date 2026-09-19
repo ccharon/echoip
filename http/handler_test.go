@@ -3,33 +3,44 @@ package http
 import (
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"net/netip"
 	"strings"
 	"testing"
 
-	"github.com/mpolden/echoip/iputil/geo"
+	"github.com/ccharon/echoip/iputil/geo"
 )
 
-func lookupAddr(net.IP) (string, error) { return "localhost", nil }
-func lookupPort(net.IP, uint64) error   { return nil }
+func lookupAddr(netip.Addr) (string, error) { return "localhost", nil }
 
 type testDb struct{}
 
-func (t *testDb) City(net.IP) (geo.City, error) {
+func (t *testDb) City(netip.Addr) (geo.City, error) {
 	return geo.City{Name: "Bornyasherk", RegionName: "North Elbonia", RegionCode: "1234", MetroCode: 1234, PostalCode: "1234", Latitude: 63.416667, Longitude: 10.416667, Timezone: "Europe/Bornyasherk", CountryName: "Elbonia", CountryISO: "EB", CountryIsEU: new(bool)}, nil
 }
 
-func (t *testDb) ASN(net.IP) (geo.ASN, error) {
+func (t *testDb) ASN(netip.Addr) (geo.ASN, error) {
 	return geo.ASN{AutonomousSystemNumber: 59795, AutonomousSystemOrganization: "Hosting4Real"}, nil
 }
 
-func (t *testDb) IsEmpty() bool { return false }
+func (t *testDb) HasCity() bool { return true }
+func (t *testDb) HasASN() bool  { return true }
+
+// pendingDb stands in for databases that are downloaded after the server
+// started.
+type pendingDb struct {
+	testDb
+	city bool
+	asn  bool
+}
+
+func (t *pendingDb) HasCity() bool { return t.city }
+func (t *pendingDb) HasASN() bool  { return t.asn }
 
 func testServer() *Server {
-	return &Server{cache: NewCache(100), gr: &testDb{}, LookupAddr: lookupAddr, LookupPort: lookupPort}
+	cfg := Config{LookupAddr: lookupAddr}
+	return New(cfg, &testDb{}, NewCache(100))
 }
 
 func httpGet(url string, acceptMediaType string, userAgent string) (string, int, error) {
@@ -121,9 +132,8 @@ func TestCLIHandlers(t *testing.T) {
 func TestDisabledHandlers(t *testing.T) {
 	log.SetOutput(io.Discard)
 	server := testServer()
-	server.LookupPort = nil
-	server.LookupAddr = nil
-	server.gr, _ = geo.Open("", "")
+	server.cfg.LookupAddr = nil
+	server.geo, _ = geo.Open("", "")
 	s := httptest.NewServer(server.Handler())
 
 	tests := []struct {
@@ -131,10 +141,11 @@ func TestDisabledHandlers(t *testing.T) {
 		out    string
 		status int
 	}{
-		{s.URL + "/port/1337", "404 page not found", 404},
 		{s.URL + "/country", "404 page not found", 404},
 		{s.URL + "/country-iso", "404 page not found", 404},
 		{s.URL + "/city", "404 page not found", 404},
+		{s.URL + "/coordinates", "404 page not found", 404},
+		{s.URL + "/asn", "404 page not found", 404},
 		{s.URL + "/json", "{\n  \"ip\": \"127.0.0.1\",\n  \"ip_decimal\": 2130706433\n}", 200},
 	}
 
@@ -162,12 +173,7 @@ func TestJSONHandlers(t *testing.T) {
 		status int
 	}{
 		{s.URL, "{\n  \"ip\": \"127.0.0.1\",\n  \"ip_decimal\": 2130706433,\n  \"country\": \"Elbonia\",\n  \"country_iso\": \"EB\",\n  \"country_eu\": false,\n  \"region_name\": \"North Elbonia\",\n  \"region_code\": \"1234\",\n  \"metro_code\": 1234,\n  \"zip_code\": \"1234\",\n  \"city\": \"Bornyasherk\",\n  \"latitude\": 63.416667,\n  \"longitude\": 10.416667,\n  \"time_zone\": \"Europe/Bornyasherk\",\n  \"asn\": \"AS59795\",\n  \"asn_org\": \"Hosting4Real\",\n  \"hostname\": \"localhost\",\n  \"user_agent\": {\n    \"product\": \"curl\",\n    \"version\": \"7.2.6.0\",\n    \"raw_value\": \"curl/7.2.6.0\"\n  }\n}", 200},
-		{s.URL + "/port/foo", "{\n  \"status\": 400,\n  \"error\": \"invalid port: foo\"\n}", 400},
-		{s.URL + "/port/0", "{\n  \"status\": 400,\n  \"error\": \"invalid port: 0\"\n}", 400},
-		{s.URL + "/port/65537", "{\n  \"status\": 400,\n  \"error\": \"invalid port: 65537\"\n}", 400},
-		{s.URL + "/port/31337", "{\n  \"ip\": \"127.0.0.1\",\n  \"port\": 31337,\n  \"reachable\": true\n}", 200},
-		{s.URL + "/port/80", "{\n  \"ip\": \"127.0.0.1\",\n  \"port\": 80,\n  \"reachable\": true\n}", 200},            // checking that our test server is reachable on port 80
-		{s.URL + "/port/80?ip=1.3.3.7", "{\n  \"ip\": \"127.0.0.1\",\n  \"port\": 80,\n  \"reachable\": true\n}", 200}, // ensuring that the "ip" parameter is not usable to check remote host ports
+		{s.URL + "/port/1337", "{\n  \"status\": 404,\n  \"error\": \"404 page not found\"\n}", 404},
 		{s.URL + "/foo", "{\n  \"status\": 404,\n  \"error\": \"404 page not found\"\n}", 404},
 		{s.URL + "/health", `{"status":"OK"}`, 200},
 	}
@@ -189,7 +195,7 @@ func TestJSONHandlers(t *testing.T) {
 func TestCacheHandler(t *testing.T) {
 	log.SetOutput(io.Discard)
 	srv := testServer()
-	srv.profile = true
+	srv.cfg.Profile = true
 	s := httptest.NewServer(srv.Handler())
 	got, _, err := httpGet(s.URL+"/debug/cache/", jsonMediaType, "")
 	if err != nil {
@@ -204,7 +210,7 @@ func TestCacheHandler(t *testing.T) {
 func TestCacheResizeHandler(t *testing.T) {
 	log.SetOutput(io.Discard)
 	srv := testServer()
-	srv.profile = true
+	srv.cfg.Profile = true
 	s := httptest.NewServer(srv.Handler())
 	_, got, err := httpPost(s.URL+"/debug/cache/resize", "10")
 	if err != nil {
@@ -216,72 +222,47 @@ func TestCacheResizeHandler(t *testing.T) {
 	}
 }
 
-func TestIPFromRequest(t *testing.T) {
-	tests := []struct {
-		remoteAddr     string
-		headerKey      string
-		headerValue    string
-		trustedHeaders []string
-		out            string
-	}{
-		{"127.0.0.1:9999", "", "", nil, "127.0.0.1"},                                                                // No header given
-		{"127.0.0.1:9999", "X-Real-IP", "1.3.3.7", nil, "127.0.0.1"},                                                // Trusted header is empty
-		{"127.0.0.1:9999", "X-Real-IP", "1.3.3.7", []string{"X-Foo-Bar"}, "127.0.0.1"},                              // Trusted header does not match
-		{"127.0.0.1:9999", "X-Real-IP", "1.3.3.7", []string{"X-Real-IP", "X-Forwarded-For"}, "1.3.3.7"},             // Trusted header matches
-		{"127.0.0.1:9999", "X-Forwarded-For", "1.3.3.7", []string{"X-Real-IP", "X-Forwarded-For"}, "1.3.3.7"},       // Second trusted header matches
-		{"127.0.0.1:9999", "X-Forwarded-For", "1.3.3.7,4.2.4.2", []string{"X-Forwarded-For"}, "1.3.3.7"},            // X-Forwarded-For with multiple entries (commas separator)
-		{"127.0.0.1:9999", "X-Forwarded-For", "1.3.3.7, 4.2.4.2", []string{"X-Forwarded-For"}, "1.3.3.7"},           // X-Forwarded-For with multiple entries (space+comma separator)
-		{"127.0.0.1:9999", "X-Forwarded-For", "", []string{"X-Forwarded-For"}, "127.0.0.1"},                         // Empty header
-		{"127.0.0.1:9999?ip=1.2.3.4", "", "", nil, "1.2.3.4"},                                                       // passed in "ip" parameter
-		{"127.0.0.1:9999?ip=1.2.3.4", "X-Forwarded-For", "1.3.3.7,4.2.4.2", []string{"X-Forwarded-For"}, "1.2.3.4"}, // ip parameter wins over X-Forwarded-For with multiple entries
-	}
-	for _, tt := range tests {
-		u, err := url.Parse("http://" + tt.remoteAddr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r := &http.Request{
-			RemoteAddr: u.Host,
-			Header:     http.Header{},
-			URL:        u,
-		}
-		r.Header.Add(tt.headerKey, tt.headerValue)
-		ip, err := ipFromRequest(tt.trustedHeaders, r, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out := net.ParseIP(tt.out)
-		if !ip.Equal(out) {
-			t.Errorf("Expected %s, got %s", out, ip)
-		}
-	}
-}
+func TestGeoHandlersFollowDatabase(t *testing.T) {
+	db := &pendingDb{}
+	server := testServer()
+	server.geo = db
+	s := httptest.NewServer(server.Handler())
+	defer s.Close()
 
-func TestCLIMatcher(t *testing.T) {
-	browserUserAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_4) " +
-		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.28 " +
-		"Safari/537.36"
-	tests := []struct {
-		in  string
-		out bool
-	}{
-		{"curl/7.26.0", true},
-		{"Wget/1.13.4 (linux-gnu)", true},
-		{"Wget", true},
-		{"fetch libfetch/2.0", true},
-		{"HTTPie/0.9.3", true},
-		{"httpie-go/0.6.0", true},
-		{"Go 1.1 package http", true},
-		{"Go-http-client/1.1", true},
-		{"Go-http-client/2.0", true},
-		{"ddclient/3.8.3", true},
-		{"Mikrotik/6.x Fetch", true},
-		{browserUserAgent, false},
-	}
-	for _, tt := range tests {
-		r := &http.Request{Header: http.Header{"User-Agent": []string{tt.in}}}
-		if got := cliMatcher(r); got != tt.out {
-			t.Errorf("Expected %t, got %t for %q", tt.out, got, tt.in)
+	status := func(url string) int {
+		t.Helper()
+		_, status, err := httpGet(s.URL+url, "", "")
+		if err != nil {
+			t.Fatal(err)
 		}
+		return status
+	}
+
+	if got := status("/country"); got != 404 {
+		t.Errorf("Expected 404 for /country while the database is missing, got %d", got)
+	}
+	if got := status("/asn"); got != 404 {
+		t.Errorf("Expected 404 for /asn while the database is missing, got %d", got)
+	}
+
+	// Each database enables its own routes.
+	db.asn = true
+	if got := status("/country"); got != 404 {
+		t.Errorf("Expected 404 for /country with only the ASN database, got %d", got)
+	}
+	if got := status("/asn"); got != 200 {
+		t.Errorf("Expected 200 for /asn with the ASN database loaded, got %d", got)
+	}
+
+	db.city = true
+	out, got, err := httpGet(s.URL+"/country", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 200 {
+		t.Fatalf("Expected 200 after the city database loaded, got %d", got)
+	}
+	if want := "Elbonia\n"; out != want {
+		t.Errorf("Expected %q, got %q", want, out)
 	}
 }

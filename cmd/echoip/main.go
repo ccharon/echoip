@@ -1,31 +1,115 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"log"
+	stdhttp "net/http"
+	"net/netip"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
-	"github.com/mpolden/echoip/http"
-	"github.com/mpolden/echoip/iputil"
-	"github.com/mpolden/echoip/iputil/geo"
+	"github.com/ccharon/echoip/http"
+	"github.com/ccharon/echoip/iputil"
+	"github.com/ccharon/echoip/iputil/geo"
+	"github.com/ccharon/echoip/maxmind"
 )
 
-type multiValueFlag []string
+// version is set at build time from the git tag.
+var version = "dev"
 
-func (f *multiValueFlag) String() string {
-	vs := ""
-	for i, v := range *f {
-		vs += v
-		if i < len(*f)-1 {
-			vs += ", "
-		}
-	}
-	return vs
+// licenseKeyEnv holds the MaxMind license key. It is read from the
+// environment rather than a flag, because flags are visible in the process
+// list.
+const licenseKeyEnv = "GEOIP_LICENSE_KEY"
+
+// MaxMind rebuilds GeoLite2 twice a week, and a check costs nothing while the
+// edition is unchanged.
+const defaultUpdateInterval = 24 * time.Hour
+
+type options struct {
+	cityFile       string
+	asnFile        string
+	listen         string
+	templateDir    string
+	headers        []string
+	trustedProxies []netip.Prefix
+	cacheSize      int
+	updateInterval time.Duration
+	reverseLookup  bool
+	profile        bool
+	showVersion    bool
 }
 
-func (f *multiValueFlag) Set(v string) error {
-	*f = append(*f, v)
-	return nil
+// parsePrefix accepts a network or a single address.
+func parsePrefix(v string) (netip.Prefix, error) {
+	if prefix, err := netip.ParsePrefix(v); err == nil {
+		return prefix.Masked(), nil
+	}
+	addr, err := netip.ParseAddr(v)
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("not an address or network: %s", v)
+	}
+	return netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()), nil
+}
+
+func parseFlags(args []string, output io.Writer) (*options, error) {
+	var opts options
+
+	fs := flag.NewFlagSet("echoip", flag.ContinueOnError)
+	fs.SetOutput(output)
+	fs.StringVar(&opts.cityFile, "c", "", "Path to GeoIP city database")
+	fs.StringVar(&opts.asnFile, "a", "", "Path to GeoIP ASN database")
+	fs.StringVar(&opts.listen, "l", ":8080", "Listening address")
+	fs.BoolVar(&opts.reverseLookup, "r", false, "Perform reverse hostname lookups")
+	fs.StringVar(&opts.templateDir, "t", "html", "Path to template dir")
+	fs.IntVar(&opts.cacheSize, "C", 0, "Size of response cache. Set to 0 to disable")
+	fs.BoolVar(&opts.profile, "P", false, "Enables profiling handlers")
+	fs.DurationVar(&opts.updateInterval, "u", defaultUpdateInterval,
+		"Interval for checking MaxMind for new GeoIP databases. Requires "+licenseKeyEnv+". Set to 0 to disable")
+	fs.BoolVar(&opts.showVersion, "version", false, "Print the version and exit")
+	fs.Func("H", "Header to trust for remote IP, if present (e.g. X-Real-IP)", func(v string) error {
+		opts.headers = append(opts.headers, v)
+		return nil
+	})
+	fs.Func("T", "Network allowed to set the headers from -H, e.g. 10.0.0.0/8. May be repeated. "+
+		"Unset trusts every peer", func(v string) error {
+		prefix, err := parsePrefix(v)
+		if err != nil {
+			return err
+		}
+		opts.trustedProxies = append(opts.trustedProxies, prefix)
+		return nil
+	})
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return nil, errors.New("unexpected arguments")
+	}
+
+	return &opts, nil
+}
+
+// editions maps the GeoLite2 editions the updater downloads to the files the
+// server reads.
+func editions(cityFile, asnFile string) map[string]string {
+	e := make(map[string]string)
+	if cityFile != "" {
+		e[maxmind.EditionCity] = cityFile
+	}
+	if asnFile != "" {
+		e[maxmind.EditionASN] = asnFile
+	}
+	return e
 }
 
 func init() {
@@ -34,64 +118,114 @@ func init() {
 }
 
 func main() {
-	cityFile := flag.String("c", "", "Path to GeoIP city database")
-	asnFile := flag.String("a", "", "Path to GeoIP ASN database")
-	listen := flag.String("l", ":8080", "Listening address")
-	reverseLookup := flag.Bool("r", false, "Perform reverse hostname lookups")
-	portLookup := flag.Bool("p", false, "Enable port lookup")
-	template := flag.String("t", "html", "Path to template dir")
-	cacheSize := flag.Int("C", 0, "Size of response cache. Set to 0 to disable")
-	profile := flag.Bool("P", false, "Enables profiling handlers")
+	opts, err := parseFlags(os.Args[1:], os.Stderr)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		os.Exit(2)
+	}
 
-	var headers multiValueFlag
-	flag.Var(&headers, "H", "Header to trust for remote IP, if present (e.g. X-Real-IP)")
-
-	flag.Parse()
-	if len(flag.Args()) != 0 {
-		flag.Usage()
+	if opts.showVersion {
+		fmt.Println(version)
 		return
 	}
 
-	r, err := geo.Open(*cityFile, *asnFile)
+	log.Printf("echoip %s", version)
+
+	updater := &maxmind.Updater{
+		LicenseKey: os.Getenv(licenseKeyEnv),
+		Interval:   opts.updateInterval,
+		Databases:  editions(opts.cityFile, opts.asnFile),
+	}
+	if len(updater.Databases) > 0 && updater.LicenseKey == "" {
+		log.Fatalf("%s must be set to download the GeoIP databases", licenseKeyEnv)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if updater.Enabled() && updater.Stale() {
+		log.Print("Checking GeoIP databases")
+		if _, err := updater.Update(ctx); err != nil {
+			log.Print(err)
+		}
+	}
+
+	// A missing or broken database only disables the lookups that need it.
+	geoReader, err := geo.Open(opts.cityFile, opts.asnFile)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("GeoIP lookups are limited: %v", err)
 	}
 
-	cache := http.NewCache(*cacheSize)
-	server := http.New(r, cache, *profile)
-	server.IPHeaders = headers
+	cache := http.NewCache(opts.cacheSize)
+	server := http.New(serverConfig(opts), geoReader, cache)
 
-	if _, err := os.Stat(*template); err == nil {
-		server.Template = *template
+	if updater.Enabled() {
+		log.Printf("Checking GeoIP databases every %s", updater.Interval)
+		go updater.Run(ctx, func() error {
+			if err := geoReader.Reload(); err != nil {
+				return err
+			}
+			// Cached responses were built from the previous databases.
+			cache.Clear()
+			return nil
+		})
+	}
+
+	log.Printf("Listening on http://%s", opts.listen)
+	if err := server.ListenAndServe(ctx, opts.listen); err != nil && !errors.Is(err, stdhttp.ErrServerClosed) {
+		log.Fatal(err)
+	}
+	log.Print("Shutdown complete")
+}
+
+func prefixList(prefixes []netip.Prefix) string {
+	parts := make([]string, len(prefixes))
+	for i, p := range prefixes {
+		parts[i] = p.String()
+	}
+	return strings.Join(parts, ", ")
+}
+
+// serverConfig turns the flags into the server configuration and reports what
+// it enabled.
+func serverConfig(opts *options) http.Config {
+	cfg := http.Config{
+		IPHeaders:      opts.headers,
+		TrustedProxies: opts.trustedProxies,
+		Profile:        opts.profile,
+	}
+
+	if _, err := os.Stat(opts.templateDir); err == nil {
+		cfg.TemplateDir = opts.templateDir
 	} else {
-		log.Printf("Not configuring default handler: Template not found: %s", *template)
+		log.Printf("Not configuring default handler: Template not found: %s", opts.templateDir)
 	}
 
-	if *reverseLookup {
-		log.Println("Enabling reverse lookup")
-		server.LookupAddr = iputil.LookupAddr
+	if opts.reverseLookup {
+		log.Print("Enabling reverse lookup")
+		cfg.LookupAddr = iputil.LookupAddr
 	}
 
-	if *portLookup {
-		log.Println("Enabling port lookup")
-		server.LookupPort = iputil.LookupPort
+	if len(opts.headers) > 0 {
+		log.Printf("Trusting remote IP from header(s): %s", strings.Join(opts.headers, ", "))
+		if len(opts.trustedProxies) == 0 {
+			log.Print("Any caller can set those headers. Set -T to limit them to the proxy")
+		} else {
+			log.Printf("Headers are only read from: %s", prefixList(opts.trustedProxies))
+		}
 	}
 
-	if len(headers) > 0 {
-		log.Printf("Trusting remote IP from header(s): %s", headers.String())
+	if opts.cacheSize > 0 {
+		log.Printf("Cache capacity set to %d", opts.cacheSize)
 	}
 
-	if *cacheSize > 0 {
-		log.Printf("Cache capacity set to %d", *cacheSize)
+	if opts.profile {
+		log.Printf("Enabling profiling handlers on /debug. They are not "+
+			"authenticated and expose memory contents, so %s must not be "+
+			"reachable from the internet while they are on", opts.listen)
 	}
 
-	if *profile {
-		log.Printf("Enabling profiling handlers")
-	}
-
-	log.Printf("Listening on http://%s", *listen)
-
-	if err := server.ListenAndServe(*listen); err != nil {
-		log.Fatal(err)
-	}
+	return cfg
 }

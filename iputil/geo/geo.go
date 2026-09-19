@@ -1,17 +1,22 @@
 package geo
 
 import (
-	"math"
-	"net"
+	"errors"
+	"net/netip"
+	"sync"
 
-	"github.com/oschwald/geoip2-golang"
+	"github.com/oschwald/geoip2-golang/v2"
 )
 
+// Reader looks up GeoIP records. The Has methods report which lookups the
+// databases currently loaded can answer.
 type Reader interface {
-	City(net.IP) (City, error)
-	ASN(net.IP) (ASN, error)
-	IsEmpty() bool
+	City(netip.Addr) (City, error)
+	ASN(netip.Addr) (ASN, error)
+	HasCity() bool
+	HasASN() bool
 }
+
 type City struct {
 	Name        string
 	Latitude    float64
@@ -31,89 +36,131 @@ type ASN struct {
 	AutonomousSystemOrganization string
 }
 
-type geoip struct {
+// Database reads GeoIP records from files that may be replaced while the
+// server runs. Every lookup holds mu for its whole duration, so Reload cannot
+// close a database that is still in use.
+type Database struct {
+	cityPath string
+	asnPath  string
+
+	mu   sync.RWMutex
 	city *geoip2.Reader
 	asn  *geoip2.Reader
 }
 
-func Open(cityDB string, asnDB string) (Reader, error) {
-	var city, asn *geoip2.Reader
-
-	if cityDB != "" {
-		r, err := geoip2.Open(cityDB)
-		if err != nil {
-			return nil, err
-		}
-		city = r
-	}
-
-	if asnDB != "" {
-		r, err := geoip2.Open(asnDB)
-		if err != nil {
-			return nil, err
-		}
-		asn = r
-	}
-
-	return &geoip{city: city, asn: asn}, nil
+// Open returns a Database reading from the given files. An empty path leaves
+// that database out. A file that cannot be opened is reported as an error, and
+// the returned Database serves the lookups of the databases that did open.
+func Open(cityDB string, asnDB string) (*Database, error) {
+	d := &Database{cityPath: cityDB, asnPath: asnDB}
+	return d, d.Reload()
 }
 
-func (g *geoip) City(ip net.IP) (City, error) {
+// Reload opens the database files again and replaces the handles that could be
+// opened. A database that fails to open keeps the handle it had, so a half
+// written or corrupt file does not take working lookups down.
+func (d *Database) Reload() error {
+	city, cityErr := openReader(d.cityPath)
+	asn, asnErr := openReader(d.asnPath)
+
+	d.mu.Lock()
+	oldCity, oldASN := d.city, d.asn
+	if cityErr == nil {
+		d.city = city
+	}
+	if asnErr == nil {
+		d.asn = asn
+	}
+	d.mu.Unlock()
+
+	if cityErr == nil {
+		closeReader(oldCity)
+	} else {
+		closeReader(city)
+	}
+	if asnErr == nil {
+		closeReader(oldASN)
+	} else {
+		closeReader(asn)
+	}
+
+	return errors.Join(cityErr, asnErr)
+}
+
+// openReader returns no reader for an empty path, which leaves that database
+// out.
+func openReader(path string) (*geoip2.Reader, error) {
+	if path == "" {
+		return nil, nil
+	}
+	return geoip2.Open(path)
+}
+
+func closeReader(r *geoip2.Reader) {
+	if r != nil {
+		_ = r.Close()
+	}
+}
+
+func (d *Database) City(addr netip.Addr) (City, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
 	city := City{}
 
-	if g.city == nil {
+	if d.city == nil || !addr.IsValid() {
 		return city, nil
 	}
 
-	record, err := g.city.City(ip)
-
+	// Unmap so an IPv4-in-IPv6 address finds its IPv4 records.
+	record, err := d.city.City(addr.Unmap())
 	if err != nil {
 		return city, err
 	}
 
 	// City Database also includes Country Data
-	if c, exists := record.Country.Names["en"]; exists {
+	if c := record.Country.Names.English; c != "" {
 		city.CountryName = c
 	}
 
-	if c, exists := record.RegisteredCountry.Names["en"]; exists && city.CountryName == "" {
+	if c := record.RegisteredCountry.Names.English; c != "" && city.CountryName == "" {
 		city.CountryName = c
 	}
 
-	if record.Country.IsoCode != "" {
-		city.CountryISO = record.Country.IsoCode
+	if record.Country.ISOCode != "" {
+		city.CountryISO = record.Country.ISOCode
 	}
 
-	if record.RegisteredCountry.IsoCode != "" && city.CountryISO == "" {
-		city.CountryISO = record.RegisteredCountry.IsoCode
+	if record.RegisteredCountry.ISOCode != "" && city.CountryISO == "" {
+		city.CountryISO = record.RegisteredCountry.ISOCode
 	}
 
 	isEU := record.Country.IsInEuropeanUnion || record.RegisteredCountry.IsInEuropeanUnion
 	city.CountryIsEU = &isEU
 
-	if c, exists := record.City.Names["en"]; exists {
+	if c := record.City.Names.English; c != "" {
 		city.Name = c
 	}
 
 	if len(record.Subdivisions) > 0 {
-		if c, exists := record.Subdivisions[0].Names["en"]; exists {
+		if c := record.Subdivisions[0].Names.English; c != "" {
 			city.RegionName = c
 		}
-		if record.Subdivisions[0].IsoCode != "" {
-			city.RegionCode = record.Subdivisions[0].IsoCode
+		if record.Subdivisions[0].ISOCode != "" {
+			city.RegionCode = record.Subdivisions[0].ISOCode
 		}
 	}
 
-	if !math.IsNaN(record.Location.Latitude) {
-		city.Latitude = record.Location.Latitude
+	if record.Location.Latitude != nil {
+		city.Latitude = *record.Location.Latitude
 	}
 
-	if !math.IsNaN(record.Location.Longitude) {
-		city.Longitude = record.Location.Longitude
+	if record.Location.Longitude != nil {
+		city.Longitude = *record.Location.Longitude
 	}
 
 	// Metro code is US Only https://maxmind.github.io/GeoIP2-dotnet/doc/v2.7.1/html/P_MaxMind_GeoIP2_Model_Location_MetroCode.htm
-	if record.Location.MetroCode > 0 && record.Country.IsoCode == "US" {
+	if record.Location.MetroCode > 0 && record.Country.ISOCode == "US" {
 		city.MetroCode = record.Location.MetroCode
 	}
 
@@ -128,13 +175,16 @@ func (g *geoip) City(ip net.IP) (City, error) {
 	return city, nil
 }
 
-func (g *geoip) ASN(ip net.IP) (ASN, error) {
+func (d *Database) ASN(addr netip.Addr) (ASN, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
 	asn := ASN{}
-	if g.asn == nil {
+	if d.asn == nil || !addr.IsValid() {
 		return asn, nil
 	}
 
-	record, err := g.asn.ASN(ip)
+	record, err := d.asn.ASN(addr.Unmap())
 	if err != nil {
 		return asn, err
 	}
@@ -149,6 +199,14 @@ func (g *geoip) ASN(ip net.IP) (ASN, error) {
 	return asn, nil
 }
 
-func (g *geoip) IsEmpty() bool {
-	return g.city == nil
+func (d *Database) HasCity() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.city != nil
+}
+
+func (d *Database) HasASN() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.asn != nil
 }
