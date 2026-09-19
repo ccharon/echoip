@@ -10,7 +10,7 @@ ASN data from the MaxMind GeoLite2 databases. The response format follows the
 
 Fork of https://github.com/leafcloudhq/echoip
 
-![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/doc/screenshot.jpg)
+![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/doc/screenshot.png)
 
 ## Run
 
