@@ -25,21 +25,12 @@ const licenseKeyEnv = "GEOIP_LICENSE_KEY"
 
 const defaultUpdateInterval = 336 * time.Hour
 
-type multiValueFlag []string
-
-func (f *multiValueFlag) String() string { return strings.Join(*f, ", ") }
-
-func (f *multiValueFlag) Set(v string) error {
-	*f = append(*f, v)
-	return nil
-}
-
 type options struct {
 	cityFile       string
 	asnFile        string
 	listen         string
 	templateDir    string
-	headers        multiValueFlag
+	headers        []string
 	cacheSize      int
 	updateInterval time.Duration
 	reverseLookup  bool
@@ -61,7 +52,10 @@ func parseFlags(args []string) (*options, error) {
 	fs.BoolVar(&opts.profile, "P", false, "Enables profiling handlers")
 	fs.DurationVar(&opts.updateInterval, "u", defaultUpdateInterval,
 		"Interval for refreshing GeoIP databases from MaxMind. Requires "+licenseKeyEnv+". Set to 0 to disable")
-	fs.Var(&opts.headers, "H", "Header to trust for remote IP, if present (e.g. X-Real-IP)")
+	fs.Func("H", "Header to trust for remote IP, if present (e.g. X-Real-IP)", func(v string) error {
+		opts.headers = append(opts.headers, v)
+		return nil
+	})
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -175,7 +169,7 @@ func serverConfig(opts *options) http.Config {
 	}
 
 	if len(opts.headers) > 0 {
-		log.Printf("Trusting remote IP from header(s): %s", opts.headers.String())
+		log.Printf("Trusting remote IP from header(s): %s", strings.Join(opts.headers, ", "))
 	}
 
 	if opts.cacheSize > 0 {
