@@ -1,10 +1,19 @@
 # Changelog
 
-## 2.0.1 - 2026-09-20
+## 2.0.2 - Unreleased
 
 ### Breaking
 
 - `MAXMIND_ACCOUNT_ID` is required beside `GEOIP_LICENSE_KEY`. Downloads use the current MaxMind endpoint, which authenticates with HTTP basic auth instead of a license key in the query string.
+
+### Fixed
+
+- `country_eu` follows the country of the address alone. The registered country says where the block is registered, not where it is used, so a block registered in the EU and used elsewhere reported `true`.
+
+## 2.0.1 - 2026-09-20
+
+### Breaking
+
 - `-t` is gone. The browser page is embedded in the binary, so the image no longer carries an `html/` directory and the templates moved to `http/html`.
 - `-version` is `-V`, the spelling curl, ssh and grep use, which leaves `-v` free of a verbose reading.
 - An address supplied through `?ip=` or a trusted header has to be globally reachable. Anything else is answered with 400. The peer address is unaffected, so a private caller is still answered for its own address.
@@ -23,7 +32,6 @@
 
 ### Fixed
 
-- `country_eu` follows the country of the address alone. The registered country says where the block is registered, not where it is used, so a block registered in the EU and used elsewhere reported `true`.
 - The request line on the page keeps `?ip=` when the page was opened for another address. It was built from the input field alone, which starts empty.
 
 ### Documentation

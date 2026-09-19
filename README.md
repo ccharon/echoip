@@ -183,11 +183,11 @@ make run              # needs GEOIP_LICENSE_KEY
 ## Release
 
 ```bash
-git tag -a v2.0.1 -m "v2.0.1"
-git push origin v2.0.1
+git tag -a v2.0.2 -m "v2.0.2"
+git push origin v2.0.2
 ```
 
-CI builds the image for the tag and publishes it as `2.0.1`, `2.0` and
+CI builds the image for the tag and publishes it as `2.0.2`, `2.0` and
 `sha-<commit>`. A push to `master` publishes `latest`. Tag the commit on
 `master`, because that is what the image is built from.
 
