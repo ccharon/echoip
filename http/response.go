@@ -41,9 +41,8 @@ func formatCoordinate(c float64) string {
 	return strconv.FormatFloat(c, 'f', 6, 64)
 }
 
-// newResponse builds the response for this request, from the cache when the
-// address is known. The user agent is never cached, because it belongs to the
-// request rather than to the address.
+// newResponse answers from the cache when the address is known. The user agent
+// belongs to the request, not to the address, so it is never cached.
 func (s *Server) newResponse(r *http.Request) (Response, error) {
 	addr, err := ipFromRequest(s.cfg.IPHeaders, r, true)
 	if err != nil {

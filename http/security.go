@@ -9,8 +9,7 @@ import (
 	"strings"
 )
 
-// Headers sent with every response. They cost nothing for the CLI answers and
-// close the gaps a browser would otherwise leave open.
+// Headers sent with every response.
 var securityHeaders = map[string]string{
 	"X-Content-Type-Options": "nosniff",
 	"Referrer-Policy":        "no-referrer",
@@ -20,15 +19,9 @@ var securityHeaders = map[string]string{
 // inlineBlock matches the body of an inline script or style element.
 var inlineBlock = regexp.MustCompile(`(?s)<(script|style)\b[^>]*>(.*?)</(?:script|style)>`)
 
-// contentSecurityPolicy describes what the browser page may load. Inline
-// script and style are allowed by hash rather than by unsafe-inline, so an
-// injected script is still refused.
-//
-// The hashes are taken from the rendered page, because html/template drops
-// comments from script and style elements and a hash over the template source
-// would not match what the browser sees. Rendering once at startup is enough:
-// neither element holds a template action, so their content is the same for
-// every request.
+// contentSecurityPolicy describes what the browser page may load. The hashes
+// that allow its inline script and style cover the rendered page, because
+// html/template drops comments from those elements.
 func contentSecurityPolicy(t *template.Template) string {
 	var scripts, styles []string
 

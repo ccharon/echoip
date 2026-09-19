@@ -12,10 +12,8 @@ import (
 // templateDir is the directory the server ships with.
 const templateDir = "../html"
 
-// TestContentSecurityPolicyCoversPage renders the real page and checks that
-// every inline block it contains is allowed by the policy sent with it. The
-// browser hashes exactly what it receives, so a template change that is not
-// reflected in the policy would silently disable the page.
+// The browser hashes exactly what it receives, so a template change the policy
+// does not cover would silently disable the page.
 func TestContentSecurityPolicyCoversPage(t *testing.T) {
 	log.SetOutput(io.Discard)
 
@@ -87,8 +85,7 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 	}
 }
 
-// TestPolicyWithoutTemplates keeps a server that serves no page from handing
-// out a policy that allows anything.
+// A server without a page must still deny everything.
 func TestPolicyWithoutTemplates(t *testing.T) {
 	policy := contentSecurityPolicy(nil)
 	for _, want := range []string{"script-src 'none'", "style-src 'none'", "default-src 'none'"} {

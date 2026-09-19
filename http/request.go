@@ -10,7 +10,7 @@ import (
 	"github.com/ccharon/echoip/useragent"
 )
 
-// cliProducts are the user agents that get the plain text response on /.
+// cliProducts get the plain text response on /.
 var cliProducts = map[string]bool{
 	"curl":           true,
 	"HTTPie":         true,
@@ -28,11 +28,9 @@ func cliMatcher(r *http.Request) bool {
 	return cliProducts[useragent.Parse(r.UserAgent()).Product]
 }
 
-// acceptsMediaType reports whether the Accept header asks for mediaType.
-// Clients list several types and add parameters, so each entry is parsed
-// instead of comparing the header as a whole. A wildcard does not count as a
-// match, which leaves the CLI response as the answer for clients that take
-// anything.
+// acceptsMediaType reports whether the Accept header asks for mediaType. A
+// wildcard does not match, which leaves the text response for clients that
+// take anything.
 func acceptsMediaType(r *http.Request, mediaType string) bool {
 	header := r.Header.Get("Accept")
 	if header == "" {
@@ -54,13 +52,9 @@ func acceptsMediaType(r *http.Request, mediaType string) bool {
 	return false
 }
 
-// ipFromRequest returns the address to report for this request. Headers are
-// read in the configured order and only the first entry of X-Forwarded-For is
-// trusted, because a client may append to that header. customIP allows the
-// address to be overridden with the ip query parameter.
-//
-// The result is unmapped, so an IPv4 address has one representation whether it
-// arrived on its own or inside IPv6.
+// ipFromRequest returns the address to report, unmapped so that an IPv4
+// address has one representation. Only the first entry of X-Forwarded-For is
+// trusted, because a client may append to that header.
 func ipFromRequest(headers []string, r *http.Request, customIP bool) (netip.Addr, error) {
 	remoteIP := ""
 	if customIP && r.URL != nil {
