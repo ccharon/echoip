@@ -191,6 +191,8 @@ make run              # needs GEOIP_LICENSE_KEY
 - The refresh runs in process. A container that is restarted more often than
   the refresh interval downloads the databases again whenever the volume is
   empty.
+- The refresh is due when the files reach the age set by `-u`, counted from
+  when they were written, so a restart does not delay it.
 - MaxMind publishes GeoLite2 updates twice a week. A 14 day interval means the
   data can be up to two weeks behind.
 - A failed refresh is logged and retried after 15 minutes. The previously
