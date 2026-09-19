@@ -31,6 +31,21 @@ const (
 // Overridden in tests.
 var downloadURL = "https://download.maxmind.com/app/geoip_download"
 
+// The license key rides in the query string, which a redirect carries along,
+// so a hop that leaves the scheme of the first request would send it in the
+// clear.
+var client = &http.Client{
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+		}
+		if req.URL.Scheme != via[0].URL.Scheme {
+			return fmt.Errorf("refusing redirect from %s to %s", via[0].URL.Scheme, req.URL.Scheme)
+		}
+		return nil
+	},
+}
+
 const (
 	// Bounds the extracted database. GeoLite2-City is around 70 MB.
 	maxDatabaseSize = 1 << 29
@@ -39,6 +54,10 @@ const (
 
 	// Bounds the checksum body, which holds one hash and a file name.
 	maxChecksumSize = 1 << 10
+
+	// What the default client allows, restated because CheckRedirect replaces
+	// that limit.
+	maxRedirects = 10
 
 	// Delay until the next attempt when a database is missing or a refresh
 	// failed, so the server does not stay without data for a whole Interval.
@@ -175,7 +194,7 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 		req.Header.Set("If-Modified-Since", fi.ModTime().UTC().Format(http.TimeFormat))
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, withoutURL(err)
 	}
@@ -226,7 +245,7 @@ func (u *Updater) verify(ctx context.Context, edition string, sum []byte) error 
 		return withoutURL(err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return withoutURL(err)
 	}
