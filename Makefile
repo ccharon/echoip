@@ -21,6 +21,9 @@ check-fmt:
 
 lint: check-fmt vet
 
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
 install:
 	go install ./...
 

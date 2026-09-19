@@ -100,6 +100,30 @@ and that is what moves the next check a full interval away. An unchanged
 database also triggers no reload, so the response cache survives a check that
 brought nothing new.
 
+## Security
+
+The service answers unauthenticated requests from anyone, so the surface it
+offers is what matters.
+
+| Measure | Effect |
+| --- | --- |
+| `/port/` only accepts routable targets | Loopback, private, link local, multicast and carrier grade NAT addresses are refused, so a caller who controls the trusted header cannot aim the check at the network around the service. |
+| Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`. |
+| Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`, so an injected script is refused. The hashes are taken from the rendered page at startup. |
+| Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it, and only moved into place when it matches. |
+| The container runs as an unprivileged user | UID 65532, with a read-only root filesystem, no capabilities and `no-new-privileges`. |
+| The license key never reaches a log | It is read from the environment, and errors are stripped of the request URL that carries it. |
+
+`-P` registers pprof and cache handlers below `/debug`. They are
+unauthenticated and expose memory contents, so the listening address must not
+be reachable from the internet while they are on.
+
+The trusted headers from `-H` decide which address the service reports and
+checks. Set them only for headers the proxy in front of the service
+overwrites, otherwise a caller can choose the address they are treated as.
+
+`make vulncheck` runs govulncheck against the module.
+
 ## Nginx configuration
 
 You can run this server with your own domain.
