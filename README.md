@@ -73,7 +73,7 @@ networks:
 
 The service speaks plain HTTP and belongs behind a proxy that terminates TLS,
 sets the trusted header and limits the request rate. A working configuration is
-in [doc/nginx.md](doc/nginx.md).
+in [doc/nginx.md](https://raw.githubusercontent.com/ccharon/echoip/master/doc/nginx.md).
 
 ## Endpoints
 
