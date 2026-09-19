@@ -3,7 +3,6 @@ package http
 import (
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 )
@@ -159,34 +158,35 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		return internalServerError(err)
 	}
 
-	// The box spans a little more than the location itself, so the map has
-	// some context around the marker.
-	const boxMargin = 0.05
-
-	data := struct {
-		Response
-		Host         string
-		BoxLatTop    float64
-		BoxLatBottom float64
-		BoxLonLeft   float64
-		BoxLonRight  float64
-		JSON         template.JS
-	}{
-		response,
-		r.Host,
-		response.Latitude + boxMargin,
-		response.Latitude - boxMargin,
-		response.Longitude - boxMargin,
-		response.Longitude + boxMargin,
-		// Marshalled JSON escapes < and >, so it cannot close the script
-		// element it is written into.
-		template.JS(jsonData),
+	data := pageData{
+		Response:     response,
+		Host:         r.Host,
+		BoxLatTop:    response.Latitude + boxMargin,
+		BoxLatBottom: response.Latitude - boxMargin,
+		BoxLonLeft:   response.Longitude - boxMargin,
+		BoxLonRight:  response.Longitude + boxMargin,
+		JSON:         string(jsonData),
 	}
 
 	if err := s.template.ExecuteTemplate(w, indexTemplate, &data); err != nil {
 		return internalServerError(err)
 	}
 	return nil
+}
+
+// boxMargin spans the map a little wider than the location itself, so the
+// marker has some context around it.
+const boxMargin = 0.05
+
+// pageData is what the browser template renders.
+type pageData struct {
+	Response
+	Host         string
+	BoxLatTop    float64
+	BoxLatBottom float64
+	BoxLonLeft   float64
+	BoxLonRight  float64
+	JSON         string
 }
 
 func notFoundHandler(_ http.ResponseWriter, r *http.Request) *AppError {

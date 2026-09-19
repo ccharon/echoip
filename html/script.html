@@ -3,7 +3,7 @@
 
     (function () {
         const host = window.location.host;
-        const response = JSON.parse(document.getElementById("response").textContent);
+        const response = JSON.parse(document.getElementById("response").dataset.response);
 
         const endpoints = document.getElementById("endpoints");
         const command = document.getElementById("command");
