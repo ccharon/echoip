@@ -148,3 +148,51 @@ func TestReloadKeepsDatabasesOnError(t *testing.T) {
 		t.Error("expected a country after a failed reload")
 	}
 }
+
+// An address the database does not know must leave every field empty, so the
+// JSON response carries none of them.
+func TestCityWithoutData(t *testing.T) {
+	cityFile, asnFile := databases(t)
+	if cityFile == "" {
+		t.Skip("GeoLite2 databases are not downloaded")
+	}
+
+	d, err := Open(cityFile, asnFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	city, err := d.City(netip.MustParseAddr("10.0.0.5"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if city.CountryIsEU != nil {
+		t.Errorf("CountryIsEU = %t, want nil", *city.CountryIsEU)
+	}
+	if city != (City{}) {
+		t.Errorf("expected the zero value, got %+v", city)
+	}
+}
+
+// A country that is not in the EU still reports the field, because false is an
+// answer there.
+func TestCityOutsideEU(t *testing.T) {
+	cityFile, asnFile := databases(t)
+	if cityFile == "" {
+		t.Skip("GeoLite2 databases are not downloaded")
+	}
+
+	d, err := Open(cityFile, asnFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	city, err := d.City(netip.MustParseAddr("8.8.8.8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if city.CountryIsEU == nil {
+		t.Fatal("expected CountryIsEU to be set")
+	}
+	if *city.CountryIsEU {
+		t.Error("expected the United States to be outside the EU")
+	}
+}

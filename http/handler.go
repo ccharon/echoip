@@ -17,9 +17,7 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if e.Code/100 == 5 {
-		log.Println(e.Err)
-	}
+	logRefused(r, e)
 
 	message := e.Message
 	if e.IsJSON() {
@@ -39,6 +37,25 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(e.Code)
 	writeRaw(w, message)
+}
+
+// logRefused records every request that was refused or failed, which is the
+// only trace an attempt to probe the service leaves. The peer address is
+// logged rather than the reported one, because a caller cannot choose it. The
+// target and the reason are quoted, because a caller picks their content and a
+// raw newline would forge a second line.
+func logRefused(r *http.Request, e *AppError) {
+	log.Printf("%s %s %q -> %d: %q", r.RemoteAddr, r.Method, clip(r.URL.RequestURI()), e.Code, clip(e.Error()))
+}
+
+// clip bounds a value a caller controls, so one request cannot fill the log
+// with a single line.
+func clip(s string) string {
+	const max = 128
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 func wrapHandlerFunc(f http.HandlerFunc) appHandler {
@@ -137,8 +154,7 @@ func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *App
 	}{fmt.Sprintf("Changed cache capacity to %d.", capacity)})
 }
 
-// browserHandler renders the HTML page. It is only registered when a template
-// was loaded.
+// browserHandler renders the HTML page.
 func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
@@ -160,7 +176,7 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		JSON:         string(jsonData),
 	}
 
-	if err := s.template.ExecuteTemplate(w, indexTemplate, &data); err != nil {
+	if err := pageTemplate.ExecuteTemplate(w, indexTemplate, &data); err != nil {
 		return internalServerError(err)
 	}
 	return nil

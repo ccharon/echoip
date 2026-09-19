@@ -135,8 +135,12 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 		city.CountryISO = record.RegisteredCountry.ISOCode
 	}
 
-	isEU := record.Country.IsInEuropeanUnion || record.RegisteredCountry.IsInEuropeanUnion
-	city.CountryIsEU = &isEU
+	// Reported only when a country was found, so an address the database does
+	// not know omits the field like every other one.
+	if city.CountryName != "" || city.CountryISO != "" {
+		isEU := record.Country.IsInEuropeanUnion || record.RegisteredCountry.IsInEuropeanUnion
+		city.CountryIsEU = &isEU
+	}
 
 	if c := record.City.Names.English; c != "" {
 		city.Name = c

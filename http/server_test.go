@@ -6,8 +6,8 @@ import (
 	"io"
 	"log"
 	stdhttp "net/http"
-	"os"
-	"path/filepath"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -32,16 +32,20 @@ func TestListenAndServeShutsDown(t *testing.T) {
 	}
 }
 
-func TestBrowserPageDisabledOnBrokenTemplate(t *testing.T) {
+// The page is built into the binary, so it is served without any file beside
+// the executable.
+func TestBrowserPage(t *testing.T) {
 	log.SetOutput(io.Discard)
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("{{ .Unclosed "), 0o644); err != nil {
+	s := httptest.NewServer(New(Config{}, &testDb{}, NewCache(0)).Handler())
+
+	out, status, err := httpGet(s.URL, "", "Mozilla/5.0")
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	s := New(Config{TemplateDir: dir}, &testDb{}, NewCache(0))
-
-	if s.template != nil {
-		t.Error("expected no template after a parse error")
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if !strings.Contains(out, "<!DOCTYPE html>") {
+		t.Errorf("expected the browser page, got %q", out)
 	}
 }

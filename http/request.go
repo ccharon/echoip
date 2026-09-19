@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/ccharon/echoip/iputil"
 	"github.com/ccharon/echoip/useragent"
 )
 
@@ -60,7 +61,7 @@ func (s *Server) ipFromRequest(r *http.Request, customIP bool) (netip.Addr, erro
 
 	if customIP && r.URL != nil {
 		if v := r.URL.Query().Get("ip"); v != "" {
-			return parseAddr(v)
+			return suppliedAddr(v)
 		}
 	}
 
@@ -71,7 +72,7 @@ func (s *Server) ipFromRequest(r *http.Request, customIP bool) (netip.Addr, erro
 				value = firstForwardedFor(value)
 			}
 			if value != "" {
-				return parseAddr(value)
+				return suppliedAddr(value)
 			}
 		}
 	}
@@ -102,10 +103,27 @@ func peerAddr(r *http.Request) (netip.Addr, error) {
 	return addrPort.Addr().Unmap(), nil
 }
 
+// suppliedAddr reads an address the caller chose, from ?ip= or from a trusted
+// header. Only a public address is accepted, so a caller cannot aim a lookup
+// at the network the service runs in. The peer address stays unchecked, which
+// keeps the service usable on a local network.
+func suppliedAddr(v string) (netip.Addr, error) {
+	addr, err := parseAddr(v)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if !iputil.Public(addr) {
+		return netip.Addr{}, fmt.Errorf("not a public IP: %s", addr)
+	}
+	return addr, nil
+}
+
+// parseAddr names the value it rejected, bounded, because no address is longer
+// than an IPv6 one and the caller chose what to send.
 func parseAddr(s string) (netip.Addr, error) {
 	addr, err := netip.ParseAddr(s)
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("could not parse IP: %s", s)
+		return netip.Addr{}, fmt.Errorf("could not parse IP: %s", clip(s))
 	}
 	return addr.Unmap(), nil
 }

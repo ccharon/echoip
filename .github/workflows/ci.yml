@@ -19,17 +19,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # The Dockerfile decides which toolchain builds the image, and
       # govulncheck reports standard library vulnerabilities for the version it
-      # runs with, so both have to agree.
-      - name: Read the Go version from the Dockerfile
-        id: go
-        run: echo "version=$(sed -n 's/^FROM golang:\([0-9.]*\)-.*/\1/p' Dockerfile)" >> "$GITHUB_OUTPUT"
+      # runs with, so the check has to use the toolchain that builds the image.
+      # A pattern that stops matching leaves an empty value, which fails the
+      # comparison rather than passing quietly.
+      - name: The Dockerfile and go.mod must name the same Go version
+        run: |
+          image=$(sed -n 's/^FROM .*golang:\([0-9][0-9.]*\)[-@ ].*/\1/p' Dockerfile)
+          mod=$(sed -n 's/^go //p' go.mod)
+          test "$image" = "$mod" || { echo "::error::Dockerfile has '$image', go.mod has '$mod'"; exit 1; }
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ steps.go.outputs.version }}
+          go-version-file: go.mod
 
       - name: Lint and test
         run: make lint test

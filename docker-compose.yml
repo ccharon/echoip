@@ -1,6 +1,7 @@
 services:
   echoip:
-    image: ccharon/echoip
+    # Pinned to a minor, so a pull cannot cross a major version.
+    image: ccharon/echoip:2.0
     ports:
       - "127.0.0.1:8082:8080"
     environment:

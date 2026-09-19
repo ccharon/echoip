@@ -37,7 +37,6 @@ type options struct {
 	cityFile       string
 	asnFile        string
 	listen         string
-	templateDir    string
 	headers        []string
 	trustedProxies []netip.Prefix
 	cacheSize      int
@@ -47,16 +46,25 @@ type options struct {
 	showVersion    bool
 }
 
-// parsePrefix accepts a network or a single address.
+// parsePrefix accepts a network in CIDR notation or a single address. Host
+// bits in a network are an error, so a typo cannot widen it silently.
 func parsePrefix(v string) (netip.Prefix, error) {
 	if prefix, err := netip.ParsePrefix(v); err == nil {
-		return prefix.Masked(), nil
+		// Supplied addresses are unmapped, so a mapped prefix matches nothing.
+		if prefix.Addr().Is4In6() {
+			return netip.Prefix{}, fmt.Errorf("write %s as an IPv4 network", v)
+		}
+		if masked := prefix.Masked(); prefix != masked {
+			return netip.Prefix{}, fmt.Errorf("%s has host bits set, write %s or a single address", v, masked)
+		}
+		return prefix, nil
 	}
 	addr, err := netip.ParseAddr(v)
 	if err != nil {
 		return netip.Prefix{}, fmt.Errorf("not an address or network: %s", v)
 	}
-	return netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()), nil
+	addr = addr.Unmap()
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
 func parseFlags(args []string, output io.Writer) (*options, error) {
@@ -64,22 +72,21 @@ func parseFlags(args []string, output io.Writer) (*options, error) {
 
 	fs := flag.NewFlagSet("echoip", flag.ContinueOnError)
 	fs.SetOutput(output)
-	fs.StringVar(&opts.cityFile, "c", "", "Path to GeoIP city database")
-	fs.StringVar(&opts.asnFile, "a", "", "Path to GeoIP ASN database")
+	fs.StringVar(&opts.cityFile, "c", "", "Path to the GeoIP city database")
+	fs.StringVar(&opts.asnFile, "a", "", "Path to the GeoIP ASN database")
 	fs.StringVar(&opts.listen, "l", ":8080", "Listening address")
 	fs.BoolVar(&opts.reverseLookup, "r", false, "Perform reverse hostname lookups")
-	fs.StringVar(&opts.templateDir, "t", "html", "Path to template dir")
-	fs.IntVar(&opts.cacheSize, "C", 0, "Size of response cache. Set to 0 to disable")
-	fs.BoolVar(&opts.profile, "P", false, "Enables profiling handlers")
+	fs.IntVar(&opts.cacheSize, "C", 0, "Size of the response cache. 0 disables caching")
+	fs.BoolVar(&opts.profile, "P", false, "Register the pprof and cache handlers below /debug")
 	fs.DurationVar(&opts.updateInterval, "u", defaultUpdateInterval,
-		"Interval for checking MaxMind for new GeoIP databases. Requires "+licenseKeyEnv+". Set to 0 to disable")
-	fs.BoolVar(&opts.showVersion, "version", false, "Print the version and exit")
-	fs.Func("H", "Header to trust for remote IP, if present (e.g. X-Real-IP)", func(v string) error {
+		"Interval for checking MaxMind for new GeoIP databases. Requires "+licenseKeyEnv+". 0 disables checking")
+	fs.BoolVar(&opts.showVersion, "V", false, "Print the version and exit")
+	fs.Func("H", "Header to trust for the remote IP, e.g. X-Real-IP. May be repeated", func(v string) error {
 		opts.headers = append(opts.headers, v)
 		return nil
 	})
-	fs.Func("T", "Network allowed to set the headers from -H, e.g. 10.0.0.0/8. May be repeated. "+
-		"Unset trusts every peer", func(v string) error {
+	fs.Func("T", "Network whose requests may set the headers from -H, e.g. 10.0.0.0/8 or a single "+
+		"address. May be repeated. Without it every peer may set them", func(v string) error {
 		prefix, err := parsePrefix(v)
 		if err != nil {
 			return err
@@ -114,7 +121,9 @@ func editions(cityFile, asnFile string) map[string]string {
 
 func init() {
 	log.SetPrefix("echoip: ")
-	log.SetFlags(log.Lshortfile)
+	// The request log is an audit trail, so every line needs its own time. A
+	// supervisor that stamps as well leaves the two side by side.
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
 func main() {
@@ -195,12 +204,6 @@ func serverConfig(opts *options) http.Config {
 		IPHeaders:      opts.headers,
 		TrustedProxies: opts.trustedProxies,
 		Profile:        opts.profile,
-	}
-
-	if _, err := os.Stat(opts.templateDir); err == nil {
-		cfg.TemplateDir = opts.templateDir
-	} else {
-		log.Printf("Not configuring default handler: Template not found: %s", opts.templateDir)
 	}
 
 	if opts.reverseLookup {

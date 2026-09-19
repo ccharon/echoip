@@ -1,6 +1,6 @@
 module github.com/ccharon/echoip
 
-go 1.26.0
+go 1.27.1
 
 require github.com/oschwald/geoip2-golang/v2 v2.4.0
 
