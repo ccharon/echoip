@@ -3,6 +3,9 @@ name: ci
 on:
   push:
     branches: [master]
+    # A version tag builds the image again, this time labelled with the
+    # version. Without this the semver tags below are never produced.
+    tags: ["v*"]
   pull_request:
     branches: [master]
 
