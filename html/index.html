@@ -95,7 +95,7 @@
     {{ end }}
 </div>
 
-<script id="response" type="application/json">{{ .JSON }}</script>
+<div id="response" hidden data-response="{{ .JSON }}"></div>
 {{ template "script.html" . }}
 </body>
 </html>

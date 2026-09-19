@@ -54,6 +54,7 @@ type Server struct {
 	cache    *Cache
 	geo      geo.Reader
 	template *template.Template
+	csp      string
 }
 
 // New builds the server. Templates are parsed once, and a template that fails
@@ -72,6 +73,8 @@ func New(cfg Config, geoReader geo.Reader, cache *Cache) *Server {
 			s.template = t
 		}
 	}
+
+	s.csp = contentSecurityPolicy(s.template)
 
 	return s
 }
@@ -117,7 +120,18 @@ func (s *Server) Handler() http.Handler {
 		r.RoutePrefix("GET", "/debug/pprof/", wrapHandlerFunc(pprof.Index))
 	}
 
-	return r.Handler()
+	return withSecurityHeaders(s.csp, r.Handler())
+}
+
+func withSecurityHeaders(csp string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header := w.Header()
+		for name, value := range securityHeaders {
+			header.Set(name, value)
+		}
+		header.Set("Content-Security-Policy", csp)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ListenAndServe serves until ctx is done, then gives requests that are still
