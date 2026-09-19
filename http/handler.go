@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 )
@@ -169,7 +170,7 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		BoxLatBottom float64
 		BoxLonLeft   float64
 		BoxLonRight  float64
-		JSON         string
+		JSON         template.JS
 	}{
 		response,
 		r.Host,
@@ -177,10 +178,12 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		response.Latitude - boxMargin,
 		response.Longitude - boxMargin,
 		response.Longitude + boxMargin,
-		string(jsonData),
+		// Marshalled JSON escapes < and >, so it cannot close the script
+		// element it is written into.
+		template.JS(jsonData),
 	}
 
-	if err := s.template.Execute(w, &data); err != nil {
+	if err := s.template.ExecuteTemplate(w, indexTemplate, &data); err != nil {
 		return internalServerError(err)
 	}
 	return nil

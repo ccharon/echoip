@@ -16,6 +16,10 @@ import (
 const (
 	jsonMediaType = "application/json"
 	textMediaType = "text/plain"
+
+	// The template rendered for browsers. The other files in the template
+	// directory are included from it.
+	indexTemplate = "index.html"
 )
 
 // Timeouts that keep a stalled or idle client from holding a connection.
@@ -59,9 +63,12 @@ func New(cfg Config, geoReader geo.Reader, cache *Cache) *Server {
 
 	if cfg.TemplateDir != "" {
 		t, err := template.ParseGlob(filepath.Join(cfg.TemplateDir, "*"))
-		if err != nil {
+		switch {
+		case err != nil:
 			log.Printf("Browser page is disabled: %v", err)
-		} else {
+		case t.Lookup(indexTemplate) == nil:
+			log.Printf("Browser page is disabled: %s holds no %s", cfg.TemplateDir, indexTemplate)
+		default:
 			s.template = t
 		}
 	}
