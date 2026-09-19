@@ -3,8 +3,7 @@ package http
 import (
 	"container/list"
 	"fmt"
-	"hash/fnv"
-	"net"
+	"net/netip"
 	"sync"
 )
 
@@ -13,7 +12,7 @@ import (
 type Cache struct {
 	mu        sync.RWMutex
 	capacity  int
-	entries   map[uint64]*list.Element
+	entries   map[netip.Addr]*list.Element
 	values    *list.List
 	evictions uint64
 }
@@ -30,24 +29,12 @@ func NewCache(capacity int) *Cache {
 	}
 	return &Cache{
 		capacity: capacity,
-		entries:  make(map[uint64]*list.Element),
+		entries:  make(map[netip.Addr]*list.Element),
 		values:   list.New(),
 	}
 }
 
-// key identifies an address regardless of whether it is held in 4 or 16 bytes,
-// so the same address is never cached twice.
-func key(ip net.IP) uint64 {
-	h := fnv.New64a()
-	if v := ip.To16(); v != nil {
-		_, _ = h.Write(v)
-	} else {
-		_, _ = h.Write(ip)
-	}
-	return h.Sum64()
-}
-
-func (c *Cache) Set(ip net.IP, resp Response) {
+func (c *Cache) Set(addr netip.Addr, resp Response) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -55,21 +42,20 @@ func (c *Cache) Set(ip net.IP, resp Response) {
 		return
 	}
 
-	k := key(ip)
-	if current, ok := c.entries[k]; ok {
+	if current, ok := c.entries[addr]; ok {
 		c.values.Remove(current)
-		delete(c.entries, k)
+		delete(c.entries, addr)
 	}
 
 	c.evict(len(c.entries) - c.capacity + 1)
-	c.entries[k] = c.values.PushBack(resp)
+	c.entries[addr] = c.values.PushBack(resp)
 }
 
-func (c *Cache) Get(ip net.IP) (Response, bool) {
+func (c *Cache) Get(addr netip.Addr) (Response, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	el, ok := c.entries[key(ip)]
+	el, ok := c.entries[addr]
 	if !ok {
 		return Response{}, false
 	}
@@ -81,7 +67,7 @@ func (c *Cache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.entries = make(map[uint64]*list.Element)
+	c.entries = make(map[netip.Addr]*list.Element)
 	c.values.Init()
 }
 
@@ -116,7 +102,7 @@ func (c *Cache) Stats() CacheStats {
 func (c *Cache) evict(n int) {
 	for el := c.values.Front(); n > 0 && el != nil; n-- {
 		next := el.Next()
-		delete(c.entries, key(el.Value.(Response).IP))
+		delete(c.entries, el.Value.(Response).IP)
 		c.values.Remove(el)
 		el = next
 		c.evictions++

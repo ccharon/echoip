@@ -3,8 +3,8 @@ package http
 import (
 	"fmt"
 	"math/big"
-	"net"
 	"net/http"
+	"net/netip"
 	"path"
 	"strconv"
 
@@ -13,7 +13,7 @@ import (
 )
 
 type Response struct {
-	IP         net.IP               `json:"ip"`
+	IP         netip.Addr           `json:"ip"`
 	IPDecimal  *big.Int             `json:"ip_decimal"`
 	Country    string               `json:"country,omitempty"`
 	CountryISO string               `json:"country_iso,omitempty"`
@@ -33,9 +33,9 @@ type Response struct {
 }
 
 type PortResponse struct {
-	IP        net.IP `json:"ip"`
-	Port      uint64 `json:"port"`
-	Reachable bool   `json:"reachable"`
+	IP        netip.Addr `json:"ip"`
+	Port      uint16     `json:"port"`
+	Reachable bool       `json:"reachable"`
 }
 
 // Coordinates formats latitude and longitude the way the CLI response prints
@@ -52,22 +52,22 @@ func formatCoordinate(c float64) string {
 // address is known. The user agent is never cached, because it belongs to the
 // request rather than to the address.
 func (s *Server) newResponse(r *http.Request) (Response, error) {
-	ip, err := ipFromRequest(s.cfg.IPHeaders, r, true)
+	addr, err := ipFromRequest(s.cfg.IPHeaders, r, true)
 	if err != nil {
 		return Response{}, err
 	}
 
-	if response, ok := s.cache.Get(ip); ok {
+	if response, ok := s.cache.Get(addr); ok {
 		response.UserAgent = userAgentFromRequest(r)
 		return response, nil
 	}
 
-	city, _ := s.geo.City(ip)
-	asn, _ := s.geo.ASN(ip)
+	city, _ := s.geo.City(addr)
+	asn, _ := s.geo.ASN(addr)
 
 	var hostname string
 	if s.cfg.LookupAddr != nil {
-		hostname, _ = s.cfg.LookupAddr(ip)
+		hostname, _ = s.cfg.LookupAddr(addr)
 	}
 
 	var asnumber string
@@ -76,8 +76,8 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 	}
 
 	response := Response{
-		IP:         ip,
-		IPDecimal:  iputil.ToDecimal(ip),
+		IP:         addr,
+		IPDecimal:  iputil.ToDecimal(addr),
 		Country:    city.CountryName,
 		CountryISO: city.CountryISO,
 		CountryEU:  city.CountryIsEU,
@@ -94,7 +94,7 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 		Hostname:   hostname,
 	}
 
-	s.cache.Set(ip, response)
+	s.cache.Set(addr, response)
 	response.UserAgent = userAgentFromRequest(r)
 
 	return response, nil
@@ -103,19 +103,20 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 func (s *Server) newPortResponse(r *http.Request) (PortResponse, error) {
 	lastElement := path.Base(r.URL.Path)
 
-	port, err := strconv.ParseUint(lastElement, 10, 16)
-	if err != nil || port == 0 {
-		return PortResponse{Port: port}, fmt.Errorf("invalid port: %s", lastElement)
+	parsed, err := strconv.ParseUint(lastElement, 10, 16)
+	if err != nil || parsed == 0 {
+		return PortResponse{}, fmt.Errorf("invalid port: %s", lastElement)
 	}
+	port := uint16(parsed)
 
-	ip, err := ipFromRequest(s.cfg.IPHeaders, r, false)
+	addr, err := ipFromRequest(s.cfg.IPHeaders, r, false)
 	if err != nil {
 		return PortResponse{Port: port}, err
 	}
 
 	return PortResponse{
-		IP:        ip,
+		IP:        addr,
 		Port:      port,
-		Reachable: s.cfg.LookupPort(ip, port) == nil,
+		Reachable: s.cfg.LookupPort(addr, port) == nil,
 	}, nil
 }

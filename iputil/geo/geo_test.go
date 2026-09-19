@@ -1,7 +1,7 @@
 package geo
 
 import (
-	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
@@ -33,7 +33,7 @@ func TestReloadDuringLookups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ip := net.ParseIP("8.8.8.8")
+	addr := netip.MustParseAddr("8.8.8.8")
 	done := make(chan struct{})
 
 	var wg sync.WaitGroup
@@ -46,11 +46,11 @@ func TestReloadDuringLookups(t *testing.T) {
 				case <-done:
 					return
 				default:
-					if _, err := d.City(ip); err != nil {
+					if _, err := d.City(addr); err != nil {
 						t.Error(err)
 						return
 					}
-					if _, err := d.ASN(ip); err != nil {
+					if _, err := d.ASN(addr); err != nil {
 						t.Error(err)
 						return
 					}
@@ -79,10 +79,10 @@ func TestOpenMissingDatabase(t *testing.T) {
 	if d.HasCity() || d.HasASN() {
 		t.Error("expected no database to be in use")
 	}
-	if _, err := d.City(net.ParseIP("8.8.8.8")); err != nil {
+	if _, err := d.City(netip.MustParseAddr("8.8.8.8")); err != nil {
 		t.Errorf("expected lookups on an empty database to succeed: %v", err)
 	}
-	if _, err := d.ASN(net.ParseIP("8.8.8.8")); err != nil {
+	if _, err := d.ASN(netip.MustParseAddr("8.8.8.8")); err != nil {
 		t.Errorf("expected lookups on an empty database to succeed: %v", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestReloadAfterMissingDatabase(t *testing.T) {
 		t.Fatal("expected both databases to be in use")
 	}
 
-	record, err := d.City(net.ParseIP("8.8.8.8"))
+	record, err := d.City(netip.MustParseAddr("8.8.8.8"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestReloadKeepsDatabasesOnError(t *testing.T) {
 	}
 
 	// The previous databases are still usable.
-	record, err := d.City(net.ParseIP("8.8.8.8"))
+	record, err := d.City(netip.MustParseAddr("8.8.8.8"))
 	if err != nil {
 		t.Fatal(err)
 	}
