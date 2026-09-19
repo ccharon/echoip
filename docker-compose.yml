@@ -1,23 +1,27 @@
-version: "3"
 services:
   echoip:
     image: ccharon/echoip
     ports:
       - "127.0.0.1:8082:8080"
+    environment:
+      GEOIP_LICENSE_KEY: ${GEOIP_LICENSE_KEY:?set GEOIP_LICENSE_KEY in .env}
     deploy:
       resources:
         limits:
           cpus: "0.10"
-          memory: 128M
+          memory: 256M
         reservations:
           cpus: "0.05"
-          memory: 64M
+          memory: 128M
     container_name: echoip
     restart: unless-stopped
     volumes:
-      - ./data:/opt/echoip/data:ro
+      - geodata:/opt/echoip/data
     networks:
       - internal
+
+volumes:
+  geodata: {}
 
 networks:
   internal: {}

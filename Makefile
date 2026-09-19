@@ -50,7 +50,7 @@ docker-login:
 	$(DOCKER) login --username "$(DOCKER_USERNAME)" --password "$(DOCKER_PASSWORD)"
 
 docker-test:
-	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)))
+	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)))
 	$(eval DOCKER_PORT=$(shell $(DOCKER) port $(CONTAINER) | cut -d ":" -f 2))
 	curl -fsS -m 5 localhost:$(DOCKER_PORT) > /dev/null; $(DOCKER) stop $(CONTAINER)
 
@@ -61,7 +61,7 @@ docker-pushx: docker-multiarch-builder docker-test docker-login
 	$(DOCKER) buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t $(DOCKER_IMAGE) --push .
 
 docker-run:
-	$(DOCKER) run --volume ./data:/opt/echoip/data --publish 8080:8080 $(DOCKER_IMAGE)
+	$(DOCKER) run --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish 8080:8080 $(DOCKER_IMAGE)
 
 xinstall:
 	env GOOS=$(XGOOS) GOARCH=$(XGOARCH) go install ./...
@@ -74,4 +74,4 @@ endif
 	@sha256sum $(GOPATH)/bin/$(XBIN)
 
 run:
-	go run cmd/echoip/main.go -a data/asn.mmdb -c data/city.mmdb -H x-forwarded-for -r -p
+	go run cmd/echoip/main.go -a data/GeoLite2-ASN.mmdb -c data/GeoLite2-City.mmdb -H x-forwarded-for -r -p
