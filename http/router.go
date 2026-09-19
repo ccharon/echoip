@@ -48,10 +48,10 @@ func (r *Router) Handler() http.Handler {
 	})
 }
 
-// Header limits the route to requests that carry this exact header value.
-func (r *Route) Header(header, value string) *Route {
+// Accept limits the route to requests whose Accept header asks for mediaType.
+func (r *Route) Accept(mediaType string) *Route {
 	return r.MatcherFunc(func(req *http.Request) bool {
-		return req.Header.Get(header) == value
+		return acceptsMediaType(req, mediaType)
 	})
 }
 
