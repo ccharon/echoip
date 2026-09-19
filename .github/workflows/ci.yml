@@ -66,7 +66,8 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ env.DOCKER_IMAGE }}:latest
 
-      - name: Trigger deployment
-        if: github.event_name == 'push'
-        run: |
-          curl -X POST ${{ secrets.WEBHOOK_URL }} -H "Content-Type: application/json" -d '{"id": "${{ github.run_id }}", "image": "${{ env.DOCKER_IMAGE }}", "token": "${{ secrets.WEBHOOK_TOKEN }}"}'
+      # Deployment is triggered by hand for now.
+      # - name: Trigger deployment
+      #   if: github.event_name == 'push'
+      #   run: |
+      #     curl -X POST ${{ secrets.WEBHOOK_URL }} -H "Content-Type: application/json" -d '{"id": "${{ github.run_id }}", "image": "${{ env.DOCKER_IMAGE }}", "token": "${{ secrets.WEBHOOK_TOKEN }}"}'
