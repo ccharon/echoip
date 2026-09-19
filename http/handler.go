@@ -91,7 +91,7 @@ func (s *Server) cliField(field func(Response) string) appHandler {
 // ipHandler answers with the address alone. It skips the geo lookups that the
 // other CLI handlers need.
 func (s *Server) ipHandler(w http.ResponseWriter, r *http.Request) *AppError {
-	ip, err := ipFromRequest(s.cfg.IPHeaders, r, true)
+	ip, err := s.ipFromRequest(r, true)
 	if err != nil {
 		return requestError(err)
 	}

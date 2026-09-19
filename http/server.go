@@ -40,6 +40,9 @@ type Config struct {
 	TemplateDir string
 	// IPHeaders are trusted for the remote address, in the order given.
 	IPHeaders []string
+	// TrustedProxies limits IPHeaders to requests from these networks. Empty
+	// trusts every peer.
+	TrustedProxies []netip.Prefix
 	// LookupAddr resolves the hostname of an address. Nil leaves the hostname
 	// out of the response.
 	LookupAddr func(netip.Addr) (string, error)

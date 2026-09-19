@@ -55,36 +55,57 @@ func acceptsMediaType(r *http.Request, mediaType string) bool {
 // ipFromRequest returns the address to report, unmapped so that an IPv4
 // address has one representation. Only the first entry of X-Forwarded-For is
 // trusted, because a client may append to that header.
-func ipFromRequest(headers []string, r *http.Request, customIP bool) (netip.Addr, error) {
-	remoteIP := ""
+func (s *Server) ipFromRequest(r *http.Request, customIP bool) (netip.Addr, error) {
+	peer, peerErr := peerAddr(r)
+
 	if customIP && r.URL != nil {
 		if v := r.URL.Query().Get("ip"); v != "" {
-			remoteIP = v
+			return parseAddr(v)
 		}
 	}
-	if remoteIP == "" {
-		for _, header := range headers {
+
+	if s.trusts(peer) {
+		for _, header := range s.cfg.IPHeaders {
 			value := r.Header.Get(header)
 			if http.CanonicalHeaderKey(header) == "X-Forwarded-For" {
 				value = firstForwardedFor(value)
 			}
 			if value != "" {
-				remoteIP = value
-				break
+				return parseAddr(value)
 			}
 		}
 	}
-	if remoteIP == "" {
-		addrPort, err := netip.ParseAddrPort(r.RemoteAddr)
-		if err != nil {
-			return netip.Addr{}, err
-		}
-		return addrPort.Addr().Unmap(), nil
-	}
 
-	addr, err := netip.ParseAddr(remoteIP)
+	return peer, peerErr
+}
+
+// trusts reports whether the headers of this peer may be believed. Without
+// TrustedProxies every peer is believed, which is what a service behind a
+// proxy that always sets the header needs.
+func (s *Server) trusts(peer netip.Addr) bool {
+	if len(s.cfg.TrustedProxies) == 0 {
+		return true
+	}
+	for _, prefix := range s.cfg.TrustedProxies {
+		if prefix.Contains(peer) {
+			return true
+		}
+	}
+	return false
+}
+
+func peerAddr(r *http.Request) (netip.Addr, error) {
+	addrPort, err := netip.ParseAddrPort(r.RemoteAddr)
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("could not parse IP: %s", remoteIP)
+		return netip.Addr{}, err
+	}
+	return addrPort.Addr().Unmap(), nil
+}
+
+func parseAddr(s string) (netip.Addr, error) {
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("could not parse IP: %s", s)
 	}
 	return addr.Unmap(), nil
 }
