@@ -5,6 +5,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -33,6 +36,9 @@ const (
 	maxDatabaseSize = 1 << 29
 
 	defaultTimeout = 10 * time.Minute
+
+	// Bounds the checksum body, which holds one hash and a file name.
+	maxChecksumSize = 1 << 10
 
 	// Delay until the next attempt when a database is missing or a refresh
 	// failed, so the server does not stay without data for a whole Interval.
@@ -161,7 +167,7 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL+"?"+params.Encode(), nil)
 	if err != nil {
-		return false, err
+		return false, withoutURL(err)
 	}
 
 	// The modification time of the file on disk is the last time this edition
@@ -180,10 +186,69 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 	case http.StatusNotModified:
 		return false, touch(path)
 	case http.StatusOK:
-		return true, extract(resp.Body, edition+".mmdb", path)
 	default:
 		return false, fmt.Errorf("unexpected status: %s", resp.Status)
 	}
+
+	// The database is put next to its destination and only moved into place
+	// once the archive it came from matches the checksum MaxMind publishes for
+	// it.
+	sum := sha256.New()
+	tmp, err := extract(io.TeeReader(resp.Body, sum), edition+".mmdb", path)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = os.Remove(tmp) }()
+
+	// The checksum covers the whole archive, and extract stops at the entry it
+	// wants.
+	if _, err := io.Copy(sum, resp.Body); err != nil {
+		return false, withoutURL(err)
+	}
+
+	if err := u.verify(ctx, edition, sum.Sum(nil)); err != nil {
+		return false, err
+	}
+
+	return true, os.Rename(tmp, path)
+}
+
+// verify compares the archive against the checksum MaxMind publishes beside
+// it.
+func (u *Updater) verify(ctx context.Context, edition string, sum []byte) error {
+	params := url.Values{
+		"edition_id":  {edition},
+		"license_key": {u.LicenseKey},
+		"suffix":      {"tar.gz.sha256"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL+"?"+params.Encode(), nil)
+	if err != nil {
+		return withoutURL(err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return withoutURL(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status for checksum: %s", resp.Status)
+	}
+
+	// The body reads "<hex>  <file name>".
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumSize))
+	if err != nil {
+		return withoutURL(err)
+	}
+	want, _, _ := strings.Cut(strings.TrimSpace(string(body)), " ")
+
+	if got := hex.EncodeToString(sum); !strings.EqualFold(got, want) {
+		return fmt.Errorf("checksum mismatch: archive is %s, MaxMind published %s", got, want)
+	}
+
+	return nil
 }
 
 // touch records that the file is current as of now, so the next refresh is due
@@ -194,7 +259,7 @@ func touch(path string) error {
 }
 
 // withoutURL strips the request URL from an error, because it carries the
-// license key.
+// license key as a query parameter.
 func withoutURL(err error) error {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
@@ -203,10 +268,12 @@ func withoutURL(err error) error {
 	return err
 }
 
-func extract(r io.Reader, name, path string) error {
+// extract writes the named database from the archive to a temporary file next
+// to path and returns that file. The caller moves it into place or removes it.
+func extract(r io.Reader, name, path string) (string, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = gz.Close() }()
 
@@ -214,45 +281,48 @@ func extract(r io.Reader, name, path string) error {
 	for {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return fmt.Errorf("%s not found in archive", name)
+			return "", fmt.Errorf("%s not found in archive", name)
 		}
 		if err != nil {
-			return err
+			return "", err
 		}
 		if header.Typeflag != tar.TypeReg || filepath.Base(header.Name) != name {
 			continue
 		}
 		if header.Size > maxDatabaseSize {
-			return fmt.Errorf("%s is %d bytes, larger than the %d byte limit", name, header.Size, maxDatabaseSize)
+			return "", fmt.Errorf("%s is %d bytes, larger than the %d byte limit", name, header.Size, maxDatabaseSize)
 		}
-		return writeFile(path, io.LimitReader(tr, maxDatabaseSize))
+		return writeTemp(path, io.LimitReader(tr, maxDatabaseSize))
 	}
 }
 
-// writeFile writes to a temporary file next to path and renames it, so a
-// reader never opens a half written database.
-func writeFile(path string, r io.Reader) error {
+// writeTemp writes to a temporary file next to path, so a reader never opens a
+// half written or unverified database.
+func writeTemp(path string, r io.Reader) (string, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return "", err
 	}
 
 	f, err := os.CreateTemp(dir, filepath.Base(path)+".*")
 	if err != nil {
-		return err
+		return "", err
 	}
 	tmp := f.Name()
-	defer func() { _ = os.Remove(tmp) }()
 
 	if _, err := io.Copy(f, r); err != nil {
 		_ = f.Close()
-		return err
+		_ = os.Remove(tmp)
+		return "", err
 	}
 	if err := f.Close(); err != nil {
-		return err
+		_ = os.Remove(tmp)
+		return "", err
 	}
 	if err := os.Chmod(tmp, 0o644); err != nil {
-		return err
+		_ = os.Remove(tmp)
+		return "", err
 	}
-	return os.Rename(tmp, path)
+
+	return tmp, nil
 }

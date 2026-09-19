@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -50,6 +52,50 @@ func archive(t *testing.T, entries map[string]string) []byte {
 	return buf.Bytes()
 }
 
+// editionArchive builds the archive the download endpoint would serve for an
+// edition. It is deterministic, so its checksum is stable across requests.
+func editionArchive(t *testing.T, edition string) []byte {
+	t.Helper()
+	return archive(t, map[string]string{
+		edition + "_20240101/" + edition + ".mmdb": edition + " data",
+	})
+}
+
+// isChecksum reports whether the request asks for the checksum rather than the
+// archive.
+func isChecksum(r *http.Request) bool {
+	return r.URL.Query().Get("suffix") == "tar.gz.sha256"
+}
+
+func writeChecksum(w http.ResponseWriter, edition string, data []byte) {
+	_, _ = fmt.Fprintf(w, "%x  %s_20240101.tar.gz\n", sha256.Sum256(data), edition)
+}
+
+// serveMaxmind answers like the download endpoint, with the archive and the
+// checksum that belongs to it.
+func serveMaxmind(t *testing.T) http.HandlerFunc {
+	t.Helper()
+
+	archives := map[string][]byte{
+		EditionASN:  editionArchive(t, EditionASN),
+		EditionCity: editionArchive(t, EditionCity),
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		edition := r.URL.Query().Get("edition_id")
+		data, ok := archives[edition]
+		if !ok {
+			http.Error(w, "unknown edition", http.StatusNotFound)
+			return
+		}
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
+		_, _ = w.Write(data)
+	}
+}
+
 func TestExtract(t *testing.T) {
 	data := archive(t, map[string]string{
 		"GeoLite2-ASN_20240101/COPYRIGHT.txt":     "copyright",
@@ -57,11 +103,17 @@ func TestExtract(t *testing.T) {
 	})
 
 	path := filepath.Join(t.TempDir(), "sub", "GeoLite2-ASN.mmdb")
-	if err := extract(bytes.NewReader(data), "GeoLite2-ASN.mmdb", path); err != nil {
+	tmp, err := extract(bytes.NewReader(data), "GeoLite2-ASN.mmdb", path)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := os.ReadFile(path)
+	// extract stops short of putting the file in place.
+	if _, err := os.Stat(path); err == nil {
+		t.Error("expected the database to stay in its temporary file")
+	}
+
+	got, err := os.ReadFile(tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,11 +122,20 @@ func TestExtract(t *testing.T) {
 	}
 }
 
-func TestExtractLeavesNoTempFiles(t *testing.T) {
-	dir := t.TempDir()
-	data := archive(t, map[string]string{"x/GeoLite2-ASN.mmdb": "database"})
+func TestUpdateLeavesNoTempFiles(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
+	defer srv.Close()
 
-	if err := extract(bytes.NewReader(data), "GeoLite2-ASN.mmdb", filepath.Join(dir, "GeoLite2-ASN.mmdb")); err != nil {
+	defer swapDownloadURL(srv.URL)()
+
+	dir := t.TempDir()
+	u := &Updater{
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: filepath.Join(dir, "GeoLite2-ASN.mmdb")},
+	}
+
+	if _, err := u.Update(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -90,7 +151,7 @@ func TestExtractLeavesNoTempFiles(t *testing.T) {
 func TestExtractMissingDatabase(t *testing.T) {
 	data := archive(t, map[string]string{"x/COPYRIGHT.txt": "copyright"})
 
-	err := extract(bytes.NewReader(data), "GeoLite2-ASN.mmdb", filepath.Join(t.TempDir(), "db.mmdb"))
+	_, err := extract(bytes.NewReader(data), "GeoLite2-ASN.mmdb", filepath.Join(t.TempDir(), "db.mmdb"))
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -103,10 +164,13 @@ func TestUpdate(t *testing.T) {
 	var gotQuery []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		edition := r.URL.Query().Get("edition_id")
+		data := editionArchive(t, edition)
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
 		gotQuery = append(gotQuery, edition+"|"+r.URL.Query().Get("license_key")+"|"+r.URL.Query().Get("suffix"))
-		_, _ = w.Write(archive(t, map[string]string{
-			edition + "_20240101/" + edition + ".mmdb": edition + " data",
-		}))
+		_, _ = w.Write(data)
 	}))
 	defer srv.Close()
 
@@ -298,14 +362,17 @@ func TestRetryDelay(t *testing.T) {
 func TestRunRetriesAfterFailedDownload(t *testing.T) {
 	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		edition := r.URL.Query().Get("edition_id")
+		data := editionArchive(t, edition)
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
 		if attempts.Add(1) == 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		edition := r.URL.Query().Get("edition_id")
-		_, _ = w.Write(archive(t, map[string]string{
-			edition + "_20240101/" + edition + ".mmdb": edition + " data",
-		}))
+		_, _ = w.Write(data)
 	}))
 	defer srv.Close()
 
@@ -360,7 +427,7 @@ func TestExtractRejectsOversizedDatabase(t *testing.T) {
 	_ = gz.Close()
 
 	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
-	err := extract(&buf, "GeoLite2-ASN.mmdb", path)
+	_, err := extract(&buf, "GeoLite2-ASN.mmdb", path)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -432,11 +499,14 @@ func TestRunStopsWithoutInterval(t *testing.T) {
 func TestRunRefreshesRepeatedly(t *testing.T) {
 	var downloads atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		downloads.Add(1)
 		edition := r.URL.Query().Get("edition_id")
-		_, _ = w.Write(archive(t, map[string]string{
-			edition + "_20240101/" + edition + ".mmdb": edition + " data",
-		}))
+		data := editionArchive(t, edition)
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
+		downloads.Add(1)
+		_, _ = w.Write(data)
 	}))
 	defer srv.Close()
 
@@ -481,15 +551,18 @@ func TestUpdateSendsConditionalRequest(t *testing.T) {
 	var gotCondition string
 	var served atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		edition := r.URL.Query().Get("edition_id")
+		data := editionArchive(t, edition)
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
 		if served.Add(1) > 1 {
 			gotCondition = r.Header.Get("If-Modified-Since")
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		edition := r.URL.Query().Get("edition_id")
-		_, _ = w.Write(archive(t, map[string]string{
-			edition + "_20240101/" + edition + ".mmdb": edition + " data",
-		}))
+		_, _ = w.Write(data)
 	}))
 	defer srv.Close()
 
@@ -544,14 +617,17 @@ func TestUpdateSendsConditionalRequest(t *testing.T) {
 func TestRunSkipsReloadWhenUnchanged(t *testing.T) {
 	var served atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		edition := r.URL.Query().Get("edition_id")
+		data := editionArchive(t, edition)
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
 		if served.Add(1) > 1 {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		edition := r.URL.Query().Get("edition_id")
-		_, _ = w.Write(archive(t, map[string]string{
-			edition + "_20240101/" + edition + ".mmdb": edition + " data",
-		}))
+		_, _ = w.Write(data)
 	}))
 	defer srv.Close()
 
@@ -589,5 +665,104 @@ func TestRunSkipsReloadWhenUnchanged(t *testing.T) {
 
 	if got := reloads.Load(); got != 1 {
 		t.Errorf("expected exactly one reload, got %d", got)
+	}
+}
+
+func TestUpdateRejectsWrongChecksum(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		edition := r.URL.Query().Get("edition_id")
+		if isChecksum(r) {
+			// A checksum for a different archive than the one served.
+			writeChecksum(w, edition, []byte("something else"))
+			return
+		}
+		_, _ = w.Write(editionArchive(t, edition))
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "GeoLite2-ASN.mmdb")
+	u := &Updater{
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+
+	changed, err := u.Update(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if changed {
+		t.Error("expected no change to be reported")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Nothing of the rejected archive is left behind.
+	if _, err := os.Stat(path); err == nil {
+		t.Error("expected no database to be written")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected an empty directory, got %v", entries)
+	}
+}
+
+func TestUpdateKeepsDatabaseOnWrongChecksum(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		edition := r.URL.Query().Get("edition_id")
+		if isChecksum(r) {
+			writeChecksum(w, edition, []byte("something else"))
+			return
+		}
+		_, _ = w.Write(editionArchive(t, edition))
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
+	if err := os.WriteFile(path, []byte("old database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	u := &Updater{
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+
+	if _, err := u.Update(context.Background()); err == nil {
+		t.Fatal("expected error")
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "old database"; string(got) != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestChecksumErrorHidesLicenseKey(t *testing.T) {
+	// A checksum request that cannot be made at all, so the error carries the
+	// request URL unless it is stripped.
+	defer swapDownloadURL("http://127.0.0.1:1")()
+
+	u := &Updater{LicenseKey: "super-secret", Interval: time.Hour}
+
+	err := u.verify(context.Background(), EditionASN, []byte{1, 2, 3})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "super-secret") {
+		t.Errorf("error leaks the license key: %v", err)
 	}
 }
