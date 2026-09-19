@@ -38,6 +38,7 @@ Changes since the fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/ec
 - The browser page was rebuilt. It carries its own CSS, loads nothing from a CDN except the map, and its script is a strict-mode IIFE bound through `addEventListener`.
 - The container runs as UID 65532 with a read-only root filesystem and no capabilities.
 - The image cross compiles instead of building the arm64 half under QEMU.
+- Building needs Go 1.27.1, the version the image is built with, so a local check evaluates the standard library that ships.
 - CI runs `make lint test` and `make vulncheck` before building, and no longer pushes on a pull request.
 - The nginx configuration in the README was rewritten: HTTP/2, HSTS, timeouts, a rate limit on the lookup path and a default server answering 444.
 
