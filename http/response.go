@@ -114,6 +114,12 @@ func (s *Server) newPortResponse(r *http.Request) (PortResponse, error) {
 		return PortResponse{Port: port}, err
 	}
 
+	// Answering for an address the service must not connect to would turn the
+	// check into a scanner for the network around it.
+	if !iputil.Routable(addr) {
+		return PortResponse{Port: port}, fmt.Errorf("cannot check %s", addr)
+	}
+
 	return PortResponse{
 		IP:        addr,
 		Port:      port,
