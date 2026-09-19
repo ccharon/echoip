@@ -122,7 +122,15 @@ them only for headers the proxy in front of the service overwrites, otherwise a
 caller can choose the address they are shown data for. That address is only
 looked up, never contacted.
 
-`make vulncheck` runs govulncheck against the module.
+`make vulncheck` runs govulncheck, which CI runs before it builds the image.
+It fails the build when a known vulnerability is reachable from this code. One
+that sits in a dependency nothing here calls is reported without failing, since
+it cannot be triggered.
+
+The Go vulnerability database carries no severity or attack vector, so "remote
+exploitable" cannot be selected for. Reachability is the stronger filter here
+anyway: everything this service can reach from a request is reachable by
+whoever sends the request.
 
 Requests are not rate limited by the service itself. The nginx configuration
 below does it, which is where it belongs.
