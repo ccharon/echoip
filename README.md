@@ -148,10 +148,13 @@ Successful requests are not logged, because the proxy in front already records
 them. Refused and failed ones are, in one line each:
 
 ```
-echoip: 2026/09/19 22:25:19 handler.go:46: 203.0.113.9:54321 GET "/ip?ip=10.0.0.5" -> 400: not a public IP: 10.0.0.5
+echoip: 2026/09/19 22:25:19 handler.go:48: 203.0.113.9:54321 GET "/ip?ip=10.0.0.5" -> 400: "not a public IP: 10.0.0.5"
 ```
 
 The address is the one the connection came from, not the one a header claims.
+The target and the reason are quoted and cut at 128 characters, because a
+caller picks their content: a newline in `?ip=` reaches the reason decoded and
+would otherwise write a line of its own.
 
 The trusted headers from `-H` decide which address the service reports. Set
 them only for headers the proxy in front of the service overwrites, otherwise a
