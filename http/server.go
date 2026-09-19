@@ -2,23 +2,32 @@ package http
 
 import (
 	"context"
+	"embed"
 	"html/template"
-	"log"
 	"net/http"
 	"net/http/pprof"
 	"net/netip"
-	"path/filepath"
 	"time"
 
 	"github.com/ccharon/echoip/iputil/geo"
 )
 
+//go:embed html
+var templateFS embed.FS
+
+// pageTemplate renders the browser page. Parsing at init means a broken
+// template stops the binary rather than quietly dropping the page.
+var pageTemplate = template.Must(template.ParseFS(templateFS, "html/*"))
+
+// csp covers the page as it is rendered, which never changes at runtime.
+var csp = contentSecurityPolicy()
+
 const (
 	jsonMediaType = "application/json"
 	textMediaType = "text/plain"
 
-	// The template rendered for browsers. The other files in the template
-	// directory are included from it.
+	// The template rendered for browsers. The other files beside it are
+	// included from it.
 	indexTemplate = "index.html"
 )
 
@@ -35,9 +44,6 @@ const (
 
 // Config holds the options that stay fixed while the server runs.
 type Config struct {
-	// TemplateDir holds the templates for the browser page. An empty path
-	// serves the CLI response on / instead.
-	TemplateDir string
 	// IPHeaders are trusted for the remote address, in the order given.
 	IPHeaders []string
 	// TrustedProxies limits IPHeaders to requests from these networks. Empty
@@ -51,33 +57,13 @@ type Config struct {
 }
 
 type Server struct {
-	cfg      Config
-	cache    *Cache
-	geo      geo.Reader
-	template *template.Template
-	csp      string
+	cfg   Config
+	cache *Cache
+	geo   geo.Reader
 }
 
-// New builds the server. Templates are parsed once, and a template that fails
-// to parse leaves the browser page disabled.
 func New(cfg Config, geoReader geo.Reader, cache *Cache) *Server {
-	s := &Server{cfg: cfg, geo: geoReader, cache: cache}
-
-	if cfg.TemplateDir != "" {
-		t, err := template.ParseGlob(filepath.Join(cfg.TemplateDir, "*"))
-		switch {
-		case err != nil:
-			log.Printf("Browser page is disabled: %v", err)
-		case t.Lookup(indexTemplate) == nil:
-			log.Printf("Browser page is disabled: %s holds no %s", cfg.TemplateDir, indexTemplate)
-		default:
-			s.template = t
-		}
-	}
-
-	s.csp = contentSecurityPolicy(s.template)
-
-	return s
+	return &Server{cfg: cfg, geo: geoReader, cache: cache}
 }
 
 // hasCity and hasASN are checked per request, because the databases may be
@@ -103,9 +89,7 @@ func (s *Server) Handler() http.Handler {
 	r.Route("GET", "/coordinates", s.cliField(Response.Coordinates)).MatcherFunc(s.hasCity)
 	r.Route("GET", "/asn", s.cliField(func(r Response) string { return r.ASN })).MatcherFunc(s.hasASN)
 
-	if s.template != nil {
-		r.Route("GET", "/", s.browserHandler)
-	}
+	r.Route("GET", "/", s.browserHandler)
 
 	if s.cfg.Profile {
 		r.Route("POST", "/debug/cache/resize", s.cacheResizeHandler)
@@ -117,7 +101,7 @@ func (s *Server) Handler() http.Handler {
 		r.RoutePrefix("GET", "/debug/pprof/", wrapHandlerFunc(pprof.Index))
 	}
 
-	return withSecurityHeaders(s.csp, r.Handler())
+	return withSecurityHeaders(csp, r.Handler())
 }
 
 func withSecurityHeaders(csp string, next http.Handler) http.Handler {

@@ -9,18 +9,12 @@ import (
 	"testing"
 )
 
-// templateDir is the directory the server ships with.
-const templateDir = "../html"
-
 // The browser hashes exactly what it receives, so a template change the policy
 // does not cover would silently disable the page.
 func TestContentSecurityPolicyCoversPage(t *testing.T) {
 	log.SetOutput(io.Discard)
 
-	server := New(Config{TemplateDir: templateDir}, &testDb{}, NewCache(0))
-	if server.template == nil {
-		t.Fatal("expected the templates to load")
-	}
+	server := New(Config{}, &testDb{}, NewCache(0))
 
 	s := httptest.NewServer(server.Handler())
 	defer s.Close()
@@ -85,12 +79,9 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 	}
 }
 
-// A server without a page must still deny everything.
-func TestPolicyWithoutTemplates(t *testing.T) {
-	policy := contentSecurityPolicy(nil)
-	for _, want := range []string{"script-src 'none'", "style-src 'none'", "default-src 'none'"} {
-		if !strings.Contains(policy, want) {
-			t.Errorf("expected %q in %s", want, policy)
-		}
+// An empty hash list denies the source rather than allowing everything.
+func TestSourcesWithoutHashes(t *testing.T) {
+	if got := sources(nil); got != "'none'" {
+		t.Errorf("sources(nil) = %q, want %q", got, "'none'")
 	}
 }

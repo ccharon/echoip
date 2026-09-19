@@ -12,6 +12,12 @@
 
         let path = "";
 
+        // The page was rendered for a supplied address, so the request line has
+        // to carry it. response.ip is the parsed form the server reports.
+        if (new URLSearchParams(window.location.search).get("ip")) {
+            ipField.value = response.ip;
+        }
+
         // The path and query the selected endpoint asks for.
         function request() {
             const address = ipField.value.trim();
@@ -25,10 +31,11 @@
             output.textContent = preview();
         }
 
-        // Only the current address is known here. Anything else has to be
-        // fetched, which the command line above does.
+        // Only the address this page was rendered for is known here. Anything
+        // else has to be fetched, which the command line above does.
         function preview() {
-            if (ipField.value.trim()) {
+            const address = ipField.value.trim();
+            if (address && address !== response.ip) {
                 return "Open the request to see the answer for another address.";
             }
             switch (path) {

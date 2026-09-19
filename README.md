@@ -72,18 +72,28 @@ networks:
 
 | Name | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `GEOIP_LICENSE_KEY` | environment | unset | MaxMind license key. Required when `-c` or `-a` is set, otherwise the server exits on start. |
-| `-a` | string | unset | Path to the GeoIP ASN database |
-| `-c` | string | unset | Path to the GeoIP city database |
+| `GEOIP_LICENSE_KEY` | environment | none | MaxMind license key. Required when `-c` or `-a` is set, otherwise the server exits on start. |
+| `-a` | string | none | Path to the GeoIP ASN database |
+| `-c` | string | none | Path to the GeoIP city database |
 | `-u` | duration | `24h` | Interval for checking MaxMind for new databases. `0` disables checking. |
-| `-l` | string | `:8080` | Listening address |
-| `-t` | string | `html` | Path to the template directory |
-| `-H` | string | unset | Header to trust for the remote IP, e.g. `X-Real-IP`. May be repeated. |
-| `-T` | string | unset | Network allowed to set the headers from `-H`, e.g. `10.0.0.0/8` or a single address. May be repeated. Unset trusts every peer. |
+| `-l` | string | `:8080` | Listening address. An empty host listens on all interfaces, IPv4 and IPv6. `0.0.0.0:8080` is IPv4 only, `127.0.0.1:8080` is loopback only. |
+| `-H` | string, repeatable | none | Header to trust for the remote IP, e.g. `X-Real-IP` |
+| `-T` | string, repeatable | any peer | Networks whose requests may set the headers from `-H`, e.g. `10.0.0.0/8` or a single address |
 | `-r` | bool | `false` | Perform reverse hostname lookups |
 | `-C` | int | `0` | Size of the response cache. `0` disables caching. |
-| `-P` | bool | `false` | Enable profiling handlers |
-| `-version` | bool | `false` | Print the version and exit |
+| `-P` | bool | `false` | Register the pprof and cache handlers below `/debug` |
+
+`-V` prints the version and exits. It configures nothing, so it is not in the
+table.
+
+The browser page is built into the binary. There is no flag to replace it.
+
+The image sets `-c`, `-a`, `-r`, `-C 1000` and `-H X-Real-IP` in its
+`ENTRYPOINT`, so the table describes the binary.
+
+`-T` takes CIDR notation or a single address. A dotted netmask is not accepted,
+and a network with host bits set is refused rather than widened, so
+`-T 10.1.2.3/8` exits with a message naming `10.0.0.0/8`.
 
 The license key is read from the environment rather than a flag, because flags
 are visible in the process list.
@@ -120,6 +130,7 @@ The service answers unauthenticated requests from anyone.
 | Measure | Effect |
 | --- | --- |
 | The service opens no outbound connections | It answers from the GeoIP databases only, so a caller cannot make it reach an address of their choosing. |
+| Only public addresses are looked up | An address from `?ip=` or from a trusted header is refused with 400 unless it is globally reachable, so a caller cannot have the resolver queried for the network the service runs in. The peer address is always answered for. |
 | Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`. |
 | Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`, so an injected script is refused. The hashes are taken from the rendered page at startup. |
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it, and only moved into place when it matches. |
@@ -133,7 +144,23 @@ be reachable from the internet while they are on.
 The trusted headers from `-H` decide which address the service reports. Set
 them only for headers the proxy in front of the service overwrites, otherwise a
 caller can choose the address they are shown data for. That address is only
-looked up, never contacted.
+looked up, never contacted, and it has to be public.
+
+`?ip=` and the trusted headers accept globally reachable addresses only.
+Loopback, RFC 1918, IPv6 unique local, carrier grade NAT, link local,
+multicast, the documentation and benchmarking ranges and the reserved space are
+answered with 400. This applies to what the caller supplies. A request whose own address is
+private, from a LAN or from localhost, is answered for that address as before.
+
+`?ip=` is read before the headers, so a local server behind a proxy is tested
+by naming a public address:
+
+```bash
+curl 'localhost:8080/json?ip=1.2.3.4'
+```
+
+A plain request through that proxy carries the loopback address the proxy sees,
+which is answered with 400.
 
 `-T` narrows that to the networks the proxy connects from. A request that
 arrives from anywhere else is answered for its own address, whatever headers it
@@ -254,6 +281,19 @@ $ curl -L echoip.yoursite.com
 
 Pass the appropriate flag (usually `-4` and `-6`) to your client to switch
 between IPv4 and IPv6 lookup.
+
+`?ip=` looks up another address, which has to be a public one:
+
+```
+$ curl -L 'echoip.yoursite.com/country?ip=1.2.3.4'
+Elbonia
+
+$ curl -L 'echoip.yoursite.com/country?ip=10.0.0.5'
+{
+  "status": 400,
+  "error": "not a public IP: 10.0.0.5"
+}
+```
 
 ### Country and city lookup:
 
