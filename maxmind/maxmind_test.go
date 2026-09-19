@@ -122,8 +122,12 @@ func TestUpdate(t *testing.T) {
 		},
 	}
 
-	if err := u.Update(context.Background()); err != nil {
+	changed, err := u.Update(context.Background())
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !changed {
+		t.Error("expected the databases to be reported as changed")
 	}
 
 	// Editions are requested in a stable order.
@@ -167,7 +171,7 @@ func TestUpdateKeepsExistingDatabaseOnError(t *testing.T) {
 		Databases:  map[string]string{"GeoLite2-ASN": path},
 	}
 
-	err := u.Update(context.Background())
+	_, err := u.Update(context.Background())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -199,7 +203,7 @@ func TestUpdateErrorHidesLicenseKey(t *testing.T) {
 		Databases:  map[string]string{"GeoLite2-ASN": filepath.Join(t.TempDir(), "db.mmdb")},
 	}
 
-	err := u.Update(context.Background())
+	_, err := u.Update(context.Background())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -470,5 +474,120 @@ func TestRunRefreshesRepeatedly(t *testing.T) {
 
 	if got := downloads.Load(); got < 3 {
 		t.Errorf("expected at least 3 downloads, got %d", got)
+	}
+}
+
+func TestUpdateSendsConditionalRequest(t *testing.T) {
+	var gotCondition string
+	var served atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if served.Add(1) > 1 {
+			gotCondition = r.Header.Get("If-Modified-Since")
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		edition := r.URL.Query().Get("edition_id")
+		_, _ = w.Write(archive(t, map[string]string{
+			edition + "_20240101/" + edition + ".mmdb": edition + " data",
+		}))
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
+	u := &Updater{
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+
+	// The first request has nothing to compare against.
+	changed, err := u.Update(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Error("expected the first update to report a change")
+	}
+
+	written, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err = u.Update(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Error("expected an unchanged database to report no change")
+	}
+	if want := written.ModTime().UTC().Format(http.TimeFormat); gotCondition != want {
+		t.Errorf("If-Modified-Since: got %q, want %q", gotCondition, want)
+	}
+
+	// A 304 still marks the file as checked, so the next refresh is a full
+	// interval away.
+	checked, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !checked.ModTime().After(written.ModTime()) {
+		t.Error("expected the modification time to move forward after a 304")
+	}
+	if got := u.nextRefresh(); got < 59*time.Minute {
+		t.Errorf("expected a refresh about an interval away, got %s", got)
+	}
+}
+
+func TestRunSkipsReloadWhenUnchanged(t *testing.T) {
+	var served atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if served.Add(1) > 1 {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		edition := r.URL.Query().Get("edition_id")
+		_, _ = w.Write(archive(t, map[string]string{
+			edition + "_20240101/" + edition + ".mmdb": edition + " data",
+		}))
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	u := &Updater{
+		LicenseKey: "secret",
+		Interval:   20 * time.Millisecond,
+		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var reloads atomic.Int32
+	go u.Run(ctx, func() error {
+		reloads.Add(1)
+		return nil
+	})
+
+	// Wait for several checks, of which only the first brings data.
+	deadline := time.After(10 * time.Second)
+	for served.Load() < 4 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out after %d requests", served.Load())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	cancel()
+
+	if got := reloads.Load(); got != 1 {
+		t.Errorf("expected exactly one reload, got %d", got)
 	}
 }

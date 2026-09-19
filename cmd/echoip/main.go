@@ -23,7 +23,10 @@ import (
 // list.
 const licenseKeyEnv = "GEOIP_LICENSE_KEY"
 
-const defaultUpdateInterval = 336 * time.Hour
+// MaxMind rebuilds GeoLite2 twice a week. A daily check keeps the data at most
+// a day behind, and costs nothing while the edition is unchanged, because the
+// request is conditional.
+const defaultUpdateInterval = 24 * time.Hour
 
 type options struct {
 	cityFile       string
@@ -51,7 +54,7 @@ func parseFlags(args []string) (*options, error) {
 	fs.IntVar(&opts.cacheSize, "C", 0, "Size of response cache. Set to 0 to disable")
 	fs.BoolVar(&opts.profile, "P", false, "Enables profiling handlers")
 	fs.DurationVar(&opts.updateInterval, "u", defaultUpdateInterval,
-		"Interval for refreshing GeoIP databases from MaxMind. Requires "+licenseKeyEnv+". Set to 0 to disable")
+		"Interval for checking MaxMind for new GeoIP databases. Requires "+licenseKeyEnv+". Set to 0 to disable")
 	fs.Func("H", "Header to trust for remote IP, if present (e.g. X-Real-IP)", func(v string) error {
 		opts.headers = append(opts.headers, v)
 		return nil
@@ -108,8 +111,8 @@ func main() {
 	defer stop()
 
 	if updater.Enabled() && updater.Stale() {
-		log.Print("Downloading GeoIP databases")
-		if err := updater.Update(ctx); err != nil {
+		log.Print("Checking GeoIP databases")
+		if _, err := updater.Update(ctx); err != nil {
 			log.Print(err)
 		}
 	}
@@ -126,7 +129,7 @@ func main() {
 	server := http.New(serverConfig(opts), geoReader, cache)
 
 	if updater.Enabled() {
-		log.Printf("Refreshing GeoIP databases every %s", updater.Interval)
+		log.Printf("Checking GeoIP databases every %s", updater.Interval)
 		go updater.Run(ctx, func() error {
 			if err := geoReader.Reload(); err != nil {
 				return err

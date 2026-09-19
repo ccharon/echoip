@@ -15,7 +15,7 @@ Fork of https://github.com/leafcloudhq/echoip
 ## Run
 
 The GeoLite2 databases are not part of the image. The container downloads them
-on first start and refreshes them every 14 days. This needs a MaxMind license
+on first start and checks for new ones once a day. This needs a MaxMind license
 key, available after free registration at
 [maxmind.com](https://www.maxmind.com), and a writable volume to keep the
 databases across restarts.
@@ -61,7 +61,7 @@ networks:
 | `GEOIP_LICENSE_KEY` | environment | unset | MaxMind license key. Required when `-c` or `-a` is set, otherwise the server exits on start. |
 | `-a` | string | unset | Path to the GeoIP ASN database |
 | `-c` | string | unset | Path to the GeoIP city database |
-| `-u` | duration | `336h` | Interval for refreshing the databases. `0` disables refreshing. |
+| `-u` | duration | `24h` | Interval for checking MaxMind for new databases. `0` disables checking. |
 | `-l` | string | `:8080` | Listening address |
 | `-t` | string | `html` | Path to the template directory |
 | `-H` | string | unset | Header to trust for the remote IP, e.g. `X-Real-IP`. May be repeated. |
@@ -81,6 +81,24 @@ A missing database does not stop the server. It starts, answers `/`, `/ip` and
 `/country`, `/country-iso`, `/city` and `/coordinates` answer `404` until the
 city database is in place, `/asn` until the ASN database is. They start working
 without a restart.
+
+## Refresh interval
+
+MaxMind rebuilds GeoLite2 twice a week. `-u` defaults to `24h`, so the data is
+at most a day behind the source. The two week interval this project used before
+left it up to two weeks behind.
+
+Checking that often costs nothing while the edition is unchanged, because the
+request is conditional. The server sends `If-Modified-Since` with the
+modification time of the file it holds, and MaxMind answers `304` with an empty
+body until it has rebuilt that edition. Data is transferred about twice a week,
+roughly 80 MB for both editions, which is what the long interval used to save.
+
+Two consequences follow from that. The modification time on disk means "last
+confirmed current" rather than "last downloaded", because a `304` updates it,
+and that is what moves the next check a full interval away. An unchanged
+database also triggers no reload, so the response cache survives a check that
+brought nothing new.
 
 ## Nginx configuration
 
@@ -191,11 +209,11 @@ make run              # needs GEOIP_LICENSE_KEY
 - The refresh runs in process. A container that is restarted more often than
   the refresh interval downloads the databases again whenever the volume is
   empty.
-- The refresh is due when the files reach the age set by `-u`, counted from
-  when they were written, so a restart does not delay it.
-- MaxMind publishes GeoLite2 updates twice a week. A 14 day interval means the
-  data can be up to two weeks behind.
-- A failed refresh is logged and retried after 15 minutes. The previously
+- The next check is due when the files reach the age set by `-u`, counted from
+  when they were last confirmed current, so a restart does not delay it.
+- A failed check is logged and retried after 15 minutes. The previously
   downloaded databases stay in use.
+- A database that is damaged after it was written goes unnoticed, because the
+  conditional request still answers `304`. Delete the file to force a download.
 - `SIGTERM` and `SIGINT` stop the listener and give running requests up to 10
   seconds to finish.
