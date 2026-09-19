@@ -180,7 +180,9 @@ func serverConfig(opts *options) http.Config {
 	}
 
 	if opts.profile {
-		log.Print("Enabling profiling handlers")
+		log.Printf("Enabling profiling handlers on /debug. They are not "+
+			"authenticated and expose memory contents, so %s must not be "+
+			"reachable from the internet while they are on", opts.listen)
 	}
 
 	return cfg
