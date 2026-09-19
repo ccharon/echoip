@@ -37,7 +37,6 @@ type options struct {
 	cacheSize      int
 	updateInterval time.Duration
 	reverseLookup  bool
-	portLookup     bool
 	profile        bool
 }
 
@@ -49,7 +48,6 @@ func parseFlags(args []string) (*options, error) {
 	fs.StringVar(&opts.asnFile, "a", "", "Path to GeoIP ASN database")
 	fs.StringVar(&opts.listen, "l", ":8080", "Listening address")
 	fs.BoolVar(&opts.reverseLookup, "r", false, "Perform reverse hostname lookups")
-	fs.BoolVar(&opts.portLookup, "p", false, "Enable port lookup")
 	fs.StringVar(&opts.templateDir, "t", "html", "Path to template dir")
 	fs.IntVar(&opts.cacheSize, "C", 0, "Size of response cache. Set to 0 to disable")
 	fs.BoolVar(&opts.profile, "P", false, "Enables profiling handlers")
@@ -164,11 +162,6 @@ func serverConfig(opts *options) http.Config {
 	if opts.reverseLookup {
 		log.Print("Enabling reverse lookup")
 		cfg.LookupAddr = iputil.LookupAddr
-	}
-
-	if opts.portLookup {
-		log.Print("Enabling port lookup")
-		cfg.LookupPort = iputil.LookupPort
 	}
 
 	if len(opts.headers) > 0 {

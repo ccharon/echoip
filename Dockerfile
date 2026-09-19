@@ -27,4 +27,4 @@ USER 65532:65532
 
 WORKDIR /opt/echoip
 VOLUME /opt/echoip/data
-ENTRYPOINT ["/opt/echoip/echoip", "-a", "data/GeoLite2-ASN.mmdb", "-c", "data/GeoLite2-City.mmdb", "-p", "-H", "X-Real-IP"]
+ENTRYPOINT ["/opt/echoip/echoip", "-a", "data/GeoLite2-ASN.mmdb", "-c", "data/GeoLite2-City.mmdb", "-H", "X-Real-IP"]

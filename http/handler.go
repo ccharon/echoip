@@ -107,14 +107,6 @@ func (s *Server) jsonHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	return writeJSON(w, response)
 }
 
-func (s *Server) portHandler(w http.ResponseWriter, r *http.Request) *AppError {
-	response, err := s.newPortResponse(r)
-	if err != nil {
-		return requestError(err)
-	}
-	return writeJSON(w, response)
-}
-
 func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) *AppError {
 	w.Header().Set("Content-Type", jsonMediaType)
 	writeRaw(w, `{"status":"OK"}`)
