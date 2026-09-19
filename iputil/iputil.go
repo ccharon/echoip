@@ -4,7 +4,7 @@ import (
 	"context"
 	"math/big"
 	"net"
-	"strconv"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -18,24 +18,22 @@ const (
 	dialTimeout = 2 * time.Second
 )
 
-// LookupAddr returns the hostname of ip, without the trailing dot of the
+// LookupAddr returns the hostname of addr, without the trailing dot of the
 // resolver answer.
-func LookupAddr(ip net.IP) (string, error) {
+func LookupAddr(addr netip.Addr) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), lookupAddrTimeout)
 	defer cancel()
 
-	names, err := net.DefaultResolver.LookupAddr(ctx, ip.String())
+	names, err := net.DefaultResolver.LookupAddr(ctx, addr.String())
 	if err != nil || len(names) == 0 {
 		return "", err
 	}
 	return strings.TrimSuffix(names[0], "."), nil
 }
 
-// LookupPort reports whether a TCP connection to ip reaches port.
-func LookupPort(ip net.IP, port uint64) error {
-	address := net.JoinHostPort(ip.String(), strconv.FormatUint(port, 10))
-
-	conn, err := net.DialTimeout("tcp", address, dialTimeout)
+// LookupPort reports whether a TCP connection to addr reaches port.
+func LookupPort(addr netip.Addr, port uint16) error {
+	conn, err := net.DialTimeout("tcp", netip.AddrPortFrom(addr, port).String(), dialTimeout)
 	if err != nil {
 		return err
 	}
@@ -44,14 +42,14 @@ func LookupPort(ip net.IP, port uint64) error {
 	return nil
 }
 
-// ToDecimal returns the address as a number, IPv4 from its 4 bytes so that the
-// value matches the usual decimal notation.
-func ToDecimal(ip net.IP) *big.Int {
-	i := big.NewInt(0)
-	if to4 := ip.To4(); to4 != nil {
-		i.SetBytes(to4)
-	} else {
-		i.SetBytes(ip)
+// ToDecimal returns the address as a number, an IPv4 address from its 4 bytes
+// so that the value matches the usual decimal notation.
+func ToDecimal(addr netip.Addr) *big.Int {
+	i := new(big.Int)
+	if addr.Is4() {
+		b := addr.As4()
+		return i.SetBytes(b[:])
 	}
-	return i
+	b := addr.As16()
+	return i.SetBytes(b[:])
 }

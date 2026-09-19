@@ -3,25 +3,25 @@ package http
 import (
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
 	"github.com/ccharon/echoip/iputil/geo"
 )
 
-func lookupAddr(net.IP) (string, error) { return "localhost", nil }
-func lookupPort(net.IP, uint64) error   { return nil }
+func lookupAddr(netip.Addr) (string, error) { return "localhost", nil }
+func lookupPort(netip.Addr, uint16) error   { return nil }
 
 type testDb struct{}
 
-func (t *testDb) City(net.IP) (geo.City, error) {
+func (t *testDb) City(netip.Addr) (geo.City, error) {
 	return geo.City{Name: "Bornyasherk", RegionName: "North Elbonia", RegionCode: "1234", MetroCode: 1234, PostalCode: "1234", Latitude: 63.416667, Longitude: 10.416667, Timezone: "Europe/Bornyasherk", CountryName: "Elbonia", CountryISO: "EB", CountryIsEU: new(bool)}, nil
 }
 
-func (t *testDb) ASN(net.IP) (geo.ASN, error) {
+func (t *testDb) ASN(netip.Addr) (geo.ASN, error) {
 	return geo.ASN{AutonomousSystemNumber: 59795, AutonomousSystemOrganization: "Hosting4Real"}, nil
 }
 

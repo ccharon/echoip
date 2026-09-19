@@ -2,8 +2,9 @@ package http
 
 import (
 	"fmt"
-	"net"
+	"mime"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/ccharon/echoip/useragent"
@@ -27,11 +28,40 @@ func cliMatcher(r *http.Request) bool {
 	return cliProducts[useragent.Parse(r.UserAgent()).Product]
 }
 
+// acceptsMediaType reports whether the Accept header asks for mediaType.
+// Clients list several types and add parameters, so each entry is parsed
+// instead of comparing the header as a whole. A wildcard does not count as a
+// match, which leaves the CLI response as the answer for clients that take
+// anything.
+func acceptsMediaType(r *http.Request, mediaType string) bool {
+	header := r.Header.Get("Accept")
+	if header == "" {
+		return false
+	}
+
+	for entry := range strings.SplitSeq(header, ",") {
+		parsed, params, err := mime.ParseMediaType(entry)
+		if err != nil || parsed != mediaType {
+			continue
+		}
+		// q=0 states that the client does not want this type at all.
+		if params["q"] == "0" {
+			return false
+		}
+		return true
+	}
+
+	return false
+}
+
 // ipFromRequest returns the address to report for this request. Headers are
 // read in the configured order and only the first entry of X-Forwarded-For is
 // trusted, because a client may append to that header. customIP allows the
 // address to be overridden with the ip query parameter.
-func ipFromRequest(headers []string, r *http.Request, customIP bool) (net.IP, error) {
+//
+// The result is unmapped, so an IPv4 address has one representation whether it
+// arrived on its own or inside IPv6.
+func ipFromRequest(headers []string, r *http.Request, customIP bool) (netip.Addr, error) {
 	remoteIP := ""
 	if customIP && r.URL != nil {
 		if v := r.URL.Query().Get("ip"); v != "" {
@@ -51,17 +81,18 @@ func ipFromRequest(headers []string, r *http.Request, customIP bool) (net.IP, er
 		}
 	}
 	if remoteIP == "" {
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		addrPort, err := netip.ParseAddrPort(r.RemoteAddr)
 		if err != nil {
-			return nil, err
+			return netip.Addr{}, err
 		}
-		remoteIP = host
+		return addrPort.Addr().Unmap(), nil
 	}
-	ip := net.ParseIP(remoteIP)
-	if ip == nil {
-		return nil, fmt.Errorf("could not parse IP: %s", remoteIP)
+
+	addr, err := netip.ParseAddr(remoteIP)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("could not parse IP: %s", remoteIP)
 	}
-	return ip, nil
+	return addr.Unmap(), nil
 }
 
 func firstForwardedFor(v string) string {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"html/template"
 	"log"
-	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/netip"
 	"path/filepath"
 	"time"
 
@@ -38,9 +38,9 @@ type Config struct {
 	IPHeaders []string
 	// LookupAddr resolves the hostname of an address. Nil leaves the hostname
 	// out of the response.
-	LookupAddr func(net.IP) (string, error)
+	LookupAddr func(netip.Addr) (string, error)
 	// LookupPort reports whether a port is reachable. Nil disables /port.
-	LookupPort func(net.IP, uint64) error
+	LookupPort func(netip.Addr, uint16) error
 	// Profile registers the cache and pprof handlers below /debug.
 	Profile bool
 }
@@ -79,11 +79,11 @@ func (s *Server) Handler() http.Handler {
 
 	r.Route("GET", "/health", s.healthHandler)
 
-	r.Route("GET", "/", s.jsonHandler).Header("Accept", jsonMediaType)
+	r.Route("GET", "/", s.jsonHandler).Accept(jsonMediaType)
 	r.Route("GET", "/json", s.jsonHandler)
 
 	r.Route("GET", "/", s.ipHandler).MatcherFunc(cliMatcher)
-	r.Route("GET", "/", s.ipHandler).Header("Accept", textMediaType)
+	r.Route("GET", "/", s.ipHandler).Accept(textMediaType)
 	r.Route("GET", "/ip", s.ipHandler)
 
 	r.Route("GET", "/country", s.cliField(func(r Response) string { return r.Country })).MatcherFunc(s.hasCity)

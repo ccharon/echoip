@@ -1,8 +1,8 @@
 package http
 
 import (
-	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"testing"
 )
@@ -24,6 +24,7 @@ func TestIPFromRequest(t *testing.T) {
 		{"127.0.0.1:9999", "X-Forwarded-For", "1.3.3.7, 4.2.4.2", []string{"X-Forwarded-For"}, "1.3.3.7"},           // X-Forwarded-For with multiple entries (space+comma separator)
 		{"127.0.0.1:9999", "X-Forwarded-For", "", []string{"X-Forwarded-For"}, "127.0.0.1"},                         // Empty header
 		{"127.0.0.1:9999?ip=1.2.3.4", "", "", nil, "1.2.3.4"},                                                       // passed in "ip" parameter
+		{"127.0.0.1:9999?ip=::ffff:1.2.3.4", "", "", nil, "1.2.3.4"},                                                // IPv4 inside IPv6 is unmapped
 		{"127.0.0.1:9999?ip=1.2.3.4", "X-Forwarded-For", "1.3.3.7,4.2.4.2", []string{"X-Forwarded-For"}, "1.2.3.4"}, // ip parameter wins over X-Forwarded-For with multiple entries
 	}
 	for _, tt := range tests {
@@ -37,13 +38,12 @@ func TestIPFromRequest(t *testing.T) {
 			URL:        u,
 		}
 		r.Header.Add(tt.headerKey, tt.headerValue)
-		ip, err := ipFromRequest(tt.trustedHeaders, r, true)
+		addr, err := ipFromRequest(tt.trustedHeaders, r, true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		out := net.ParseIP(tt.out)
-		if !ip.Equal(out) {
-			t.Errorf("Expected %s, got %s", out, ip)
+		if want := netip.MustParseAddr(tt.out); addr != want {
+			t.Errorf("Expected %s, got %s", want, addr)
 		}
 	}
 }
@@ -73,6 +73,31 @@ func TestCLIMatcher(t *testing.T) {
 		r := &http.Request{Header: http.Header{"User-Agent": []string{tt.in}}}
 		if got := cliMatcher(r); got != tt.out {
 			t.Errorf("Expected %t, got %t for %q", tt.out, got, tt.in)
+		}
+	}
+}
+
+func TestAcceptsMediaType(t *testing.T) {
+	tests := []struct {
+		header string
+		out    bool
+	}{
+		{"application/json", true},
+		{"application/json, text/plain, */*", true},
+		{"application/json; charset=utf-8", true},
+		{"text/html, application/json;q=0.9", true},
+		{"application/json;q=0", false},
+		{"*/*", false},
+		{"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", false},
+		{"", false},
+		{"application/jsonp", false},
+		{"not a media type", false},
+	}
+
+	for _, tt := range tests {
+		r := &http.Request{Header: http.Header{"Accept": []string{tt.header}}}
+		if got := acceptsMediaType(r, "application/json"); got != tt.out {
+			t.Errorf("Expected %t, got %t for %q", tt.out, got, tt.header)
 		}
 	}
 }

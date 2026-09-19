@@ -2,7 +2,7 @@ package http
 
 import (
 	"fmt"
-	"net"
+	"net/netip"
 	"testing"
 )
 
@@ -21,7 +21,7 @@ func TestCacheCapacity(t *testing.T) {
 		c := NewCache(tt.capacity)
 		var responses []Response
 		for i := 0; i < tt.addCount; i++ {
-			ip := net.ParseIP(fmt.Sprintf("192.0.2.%d", i))
+			ip := netip.MustParseAddr(fmt.Sprintf("192.0.2.%d", i))
 			r := Response{IP: ip}
 			responses = append(responses, r)
 			c.Set(ip, r)
@@ -47,7 +47,7 @@ func TestCacheCapacity(t *testing.T) {
 
 func TestCacheDuplicate(t *testing.T) {
 	c := NewCache(10)
-	ip := net.ParseIP("192.0.2.1")
+	ip := netip.MustParseAddr("192.0.2.1")
 	response := Response{IP: ip}
 	c.Set(ip, response)
 	c.Set(ip, response)
@@ -63,7 +63,7 @@ func TestCacheDuplicate(t *testing.T) {
 func TestCacheResize(t *testing.T) {
 	c := NewCache(10)
 	for i := 1; i <= 20; i++ {
-		ip := net.ParseIP(fmt.Sprintf("192.0.2.%d", i))
+		ip := netip.MustParseAddr(fmt.Sprintf("192.0.2.%d", i))
 		r := Response{IP: ip}
 		c.Set(ip, r)
 	}
@@ -79,7 +79,7 @@ func TestCacheResize(t *testing.T) {
 	if got, want := c.evictions, uint64(0); got != want {
 		t.Errorf("want %d evictions, got %d", want, got)
 	}
-	r := Response{IP: net.ParseIP("192.0.2.42")}
+	r := Response{IP: netip.MustParseAddr("192.0.2.42")}
 	c.Set(r.IP, r)
 	if got, want := len(c.entries), 5; got != want {
 		t.Errorf("want %d entries, got %d", want, got)
@@ -88,7 +88,7 @@ func TestCacheResize(t *testing.T) {
 
 func TestCacheClear(t *testing.T) {
 	c := NewCache(10)
-	ip := net.ParseIP("127.0.0.1")
+	ip := netip.MustParseAddr("127.0.0.1")
 	c.Set(ip, Response{IP: ip})
 
 	c.Clear()
@@ -107,26 +107,26 @@ func TestCacheClear(t *testing.T) {
 	}
 }
 
-func TestCacheKeyIgnoresAddressLength(t *testing.T) {
+func TestCacheKeyUnmapsIPv4(t *testing.T) {
 	c := NewCache(10)
-	ip := net.ParseIP("192.0.2.1")
+	addr := netip.MustParseAddr("192.0.2.1")
+	c.Set(addr, Response{IP: addr})
 
-	c.Set(ip, Response{IP: ip})
-
-	// The same address in its 4 byte form must hit the same entry.
-	if _, ok := c.Get(ip.To4()); !ok {
-		t.Error("expected the 4 byte form to hit the cached entry")
+	// The mapped form is a different netip.Addr, so callers must unmap before
+	// they reach the cache. ipFromRequest does that.
+	mapped := netip.AddrFrom16(addr.As16())
+	if _, ok := c.Get(mapped); ok {
+		t.Error("expected the mapped form to miss")
 	}
-	c.Set(ip.To4(), Response{IP: ip})
-	if got, want := len(c.entries), 1; got != want {
-		t.Errorf("want %d entries, got %d", want, got)
+	if _, ok := c.Get(mapped.Unmap()); !ok {
+		t.Error("expected the unmapped form to hit")
 	}
 }
 
 func TestCacheOverwriteDoesNotEvict(t *testing.T) {
 	c := NewCache(2)
-	first := net.ParseIP("192.0.2.1")
-	second := net.ParseIP("192.0.2.2")
+	first := netip.MustParseAddr("192.0.2.1")
+	second := netip.MustParseAddr("192.0.2.2")
 	c.Set(first, Response{IP: first})
 	c.Set(second, Response{IP: second})
 
@@ -143,7 +143,7 @@ func TestCacheOverwriteDoesNotEvict(t *testing.T) {
 func TestCacheResizeDropsEntries(t *testing.T) {
 	c := NewCache(10)
 	for i := 1; i <= 10; i++ {
-		ip := net.ParseIP(fmt.Sprintf("192.0.2.%d", i))
+		ip := netip.MustParseAddr(fmt.Sprintf("192.0.2.%d", i))
 		c.Set(ip, Response{IP: ip})
 	}
 
@@ -157,7 +157,7 @@ func TestCacheResizeDropsEntries(t *testing.T) {
 	if got, want := c.values.Len(), 3; got != want {
 		t.Errorf("want %d values after shrinking, got %d", want, got)
 	}
-	newest := net.ParseIP("192.0.2.10")
+	newest := netip.MustParseAddr("192.0.2.10")
 	if _, ok := c.Get(newest); !ok {
 		t.Error("expected the newest entry to survive shrinking")
 	}
@@ -165,7 +165,7 @@ func TestCacheResizeDropsEntries(t *testing.T) {
 
 func TestCacheDisabled(t *testing.T) {
 	c := NewCache(0)
-	ip := net.ParseIP("192.0.2.1")
+	ip := netip.MustParseAddr("192.0.2.1")
 
 	c.Set(ip, Response{IP: ip})
 

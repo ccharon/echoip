@@ -2,7 +2,6 @@ package geo
 
 import (
 	"errors"
-	"net"
 	"net/netip"
 	"sync"
 
@@ -12,8 +11,8 @@ import (
 // Reader looks up GeoIP records. The Has methods report which lookups the
 // databases currently loaded can answer.
 type Reader interface {
-	City(net.IP) (City, error)
-	ASN(net.IP) (ASN, error)
+	City(netip.Addr) (City, error)
+	ASN(netip.Addr) (ASN, error)
 	HasCity() bool
 	HasASN() bool
 }
@@ -103,33 +102,18 @@ func closeReader(r *geoip2.Reader) {
 	}
 }
 
-// toAddr converts to the address type expected by geoip2. Unmap keeps
-// IPv4-in-IPv6 addresses from missing their IPv4 records.
-func toAddr(ip net.IP) (netip.Addr, bool) {
-	addr, ok := netip.AddrFromSlice(ip)
-	if !ok {
-		return netip.Addr{}, false
-	}
-	return addr.Unmap(), true
-}
-
-func (d *Database) City(ip net.IP) (City, error) {
+func (d *Database) City(addr netip.Addr) (City, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
 	city := City{}
 
-	if d.city == nil {
+	if d.city == nil || !addr.IsValid() {
 		return city, nil
 	}
 
-	addr, ok := toAddr(ip)
-	if !ok {
-		return city, nil
-	}
-
-	record, err := d.city.City(addr)
-
+	// Unmap so an IPv4-in-IPv6 address finds its IPv4 records.
+	record, err := d.city.City(addr.Unmap())
 	if err != nil {
 		return city, err
 	}
@@ -191,21 +175,16 @@ func (d *Database) City(ip net.IP) (City, error) {
 	return city, nil
 }
 
-func (d *Database) ASN(ip net.IP) (ASN, error) {
+func (d *Database) ASN(addr netip.Addr) (ASN, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
 	asn := ASN{}
-	if d.asn == nil {
+	if d.asn == nil || !addr.IsValid() {
 		return asn, nil
 	}
 
-	addr, ok := toAddr(ip)
-	if !ok {
-		return asn, nil
-	}
-
-	record, err := d.asn.ASN(addr)
+	record, err := d.asn.ASN(addr.Unmap())
 	if err != nil {
 		return asn, err
 	}
