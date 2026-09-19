@@ -1,90 +1,88 @@
-<script lang="text/javascript">
-    let host = "{{ .Host }}";
-    let jsonObj = "{{ .JSON }}";
-    let data = JSON.parse(jsonObj);
-    let tool = "curl -L";
-    let commandBox, widgetBox, compositePath, commandStr;
-    let path
-    let ipQuery, portQuery
-    let ipCheckBox, portCheckBox, portInput
-    let ip = ''
+<script>
+    "use strict";
 
-    window.onload = (event) => {
-        commandBox = document.getElementById('command');
-        widgetBox = document.getElementById('output');
-        ipCheckBox = document.getElementById('ipCheckBox')
-        portCheckBox = document.getElementById('portCheckBox')
-        portInput = document.getElementById('portInput')
-        reset()
-        setcommdStr()
-        changeInput("ip")
-    }
+    (function () {
+        const host = window.location.host;
+        const response = JSON.parse(document.getElementById("response").textContent);
 
-    function reset() {
-        path = '';
-        ipQuery = '';
-        portQuery = '';
-    }
+        const endpoints = document.getElementById("endpoints");
+        const command = document.getElementById("command");
+        const output = document.getElementById("output");
+        const portField = document.getElementById("port");
+        const ipField = document.getElementById("ip");
 
-    function setcommdStr() {
-        compositePath = `${path}${portQuery}${ipQuery}`;
-        commandStr = `${tool} ${host}/${compositePath}`;
-        commandBox.innerText = commandStr;
-    }
+        let path = "";
 
-    function changeInput(input, button) {
-        path = input
-        portQuery = ""
-        portInput.classList.add("hidden");
-        switch (path) {
-            case "json":
-                output.innerText = jsonObj
-                break
-            case "country-iso":
-                output.innerText = data["country_iso"]
-                break
-            case "port":
-                portInput.classList.remove("hidden");
-                path = "port";
-                output.innerText = "{}";
-                let currentPort = document.querySelector("#portInput").value;
-                updatePort(currentPort);
-                break
-            case "ip":
-                output.innerText = data["ip"]
-                path = ""
-                break
-            default:
-                output.innerText = data[path]
+        // The path and query the selected endpoint asks for.
+        function request() {
+            const address = ipField.value.trim();
+            const query = address ? "?ip=" + encodeURIComponent(address) : "";
+            const port = path === "port" ? "/" + (portField.value || "0") : "";
+
+            return `/${path}${port}${query}`;
         }
-        setcommdStr();
 
-        // set button selected
-        if (button) {
-            allButtons = document.querySelectorAll(('button.selected'));
-            allButtons.forEach((btn) => {
-                btn.classList.remove("selected")
-            })
-
-            button.classList.add("selected");
+        function render() {
+            command.textContent = `curl -L ${host}${request()}`;
+            output.textContent = preview();
         }
-    }
 
-    function navigate(event) {
-        console.log("navigate", compositePath)
-        window.location = compositePath
-    }
+        // Only the current address is known here. Anything else has to be
+        // fetched, which the command line above does.
+        function preview() {
+            if (ipField.value.trim()) {
+                return "Open the request to see the answer for another address.";
+            }
+            switch (path) {
+                case "":
+                    return response.ip;
+                case "json":
+                    return JSON.stringify(response, null, 2);
+                case "port":
+                    return "Open the request to check the port.";
+                default: {
+                    const value = response[path.replace("-", "_")];
+                    return value === undefined || value === "" ? "(not available for this address)" : String(value);
+                }
+            }
+        }
 
-    function updatePort(value) {
-        port = value
-        portQuery = `/${port}`
-        setcommdStr()
-    }
+        function selectEndpoint(button) {
+            path = button.dataset.path;
+            for (const chip of endpoints.querySelectorAll(".chip")) {
+                chip.setAttribute("aria-pressed", String(chip === button));
+            }
+            portField.hidden = path !== "port";
+            render();
+        }
 
-    function updateIP(value) {
-        ip = value
-        ipQuery = `?ip=${ip}`;
-        setcommdStr()
-        changeInput("ip", null)
-    }
+        endpoints.addEventListener("click", function (event) {
+            const button = event.target.closest(".chip");
+            if (button) {
+                selectEndpoint(button);
+            }
+        });
+
+        portField.addEventListener("input", render);
+        ipField.addEventListener("input", render);
+
+        document.getElementById("open").addEventListener("click", function () {
+            window.location.assign(request());
+        });
+
+        document.getElementById("copy").addEventListener("click", async function (event) {
+            const button = event.currentTarget;
+            try {
+                await navigator.clipboard.writeText(command.textContent);
+                button.textContent = "Copied";
+            } catch {
+                button.textContent = "Press Ctrl+C";
+            }
+            setTimeout(function () {
+                button.textContent = "Copy";
+            }, 1500);
+        });
+
+        render();
+    })();
 </script>
