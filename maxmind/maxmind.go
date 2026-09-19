@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -53,13 +54,33 @@ func (u *Updater) Enabled() bool {
 
 // Stale reports whether any database is missing or older than Interval.
 func (u *Updater) Stale() bool {
+	return u.oldest() >= u.Interval
+}
+
+// oldest returns the age of the database that was written longest ago. A
+// missing database counts as infinitely old.
+func (u *Updater) oldest() time.Duration {
+	oldest := time.Duration(0)
 	for _, path := range u.Databases {
 		fi, err := os.Stat(path)
-		if err != nil || time.Since(fi.ModTime()) >= u.Interval {
-			return true
+		if err != nil {
+			return time.Duration(math.MaxInt64)
+		}
+		if age := time.Since(fi.ModTime()); age > oldest {
+			oldest = age
 		}
 	}
-	return false
+	return oldest
+}
+
+// nextRefresh returns how long to wait for the next download. It counts from
+// the age of the databases rather than from now, so a restart does not push
+// the refresh a full Interval into the future.
+func (u *Updater) nextRefresh() time.Duration {
+	if remaining := u.Interval - u.oldest(); remaining > 0 {
+		return remaining
+	}
+	return u.retryDelay()
 }
 
 // Update downloads every configured database and replaces the file on disk.
@@ -72,15 +93,15 @@ func (u *Updater) Update(ctx context.Context) error {
 	return nil
 }
 
-// Run refreshes the databases every Interval until ctx is done and calls
-// onUpdate after each successful refresh. A failed refresh, and a database
-// that is already stale when Run starts, are retried after retryInterval.
+// Run keeps the databases no older than Interval until ctx is done, and calls
+// onUpdate after each successful refresh. A failed refresh is retried after
+// retryInterval.
 func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
-	next := u.Interval
-	if u.Stale() {
-		next = u.retryDelay()
+	if u.Interval <= 0 {
+		return
 	}
-	timer := time.NewTimer(next)
+
+	timer := time.NewTimer(u.nextRefresh())
 	defer timer.Stop()
 
 	for {
@@ -90,7 +111,7 @@ func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 		case <-timer.C:
 		}
 
-		next = u.Interval
+		var next time.Duration
 		if err := u.Update(ctx); err != nil {
 			log.Printf("GeoIP update failed: %v", err)
 			next = u.retryDelay()
@@ -99,6 +120,7 @@ func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 			next = u.retryDelay()
 		} else {
 			log.Print("GeoIP databases updated")
+			next = u.nextRefresh()
 		}
 		timer.Reset(next)
 	}

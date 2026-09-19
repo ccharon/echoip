@@ -367,3 +367,108 @@ func TestExtractRejectsOversizedDatabase(t *testing.T) {
 		t.Error("expected no database to be written")
 	}
 }
+
+func TestNextRefreshCountsFromDatabaseAge(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "GeoLite2-ASN.mmdb")
+	u := &Updater{
+		LicenseKey: "secret",
+		Interval:   14 * 24 * time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+
+	// A missing database is due right away, bounded by the retry delay.
+	if got := u.nextRefresh(); got != u.retryDelay() {
+		t.Errorf("missing database: got %s, want %s", got, u.retryDelay())
+	}
+
+	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		age  time.Duration
+		want time.Duration
+	}{
+		{0, 14 * 24 * time.Hour},
+		{13 * 24 * time.Hour, 24 * time.Hour},
+		{14 * 24 * time.Hour, retryInterval},
+		{30 * 24 * time.Hour, retryInterval},
+	}
+
+	for _, tt := range tests {
+		written := time.Now().Add(-tt.age)
+		if err := os.Chtimes(path, written, written); err != nil {
+			t.Fatal(err)
+		}
+		got := u.nextRefresh()
+		// The age is measured against time.Now, so allow for the test running.
+		if diff := got - tt.want; diff > time.Minute || diff < -time.Minute {
+			t.Errorf("age %s: got %s, want %s", tt.age, got, tt.want)
+		}
+	}
+}
+
+func TestRunStopsWithoutInterval(t *testing.T) {
+	u := &Updater{LicenseKey: "secret", Databases: map[string]string{EditionASN: "unused"}}
+
+	done := make(chan struct{})
+	go func() {
+		u.Run(context.Background(), func() error { return nil })
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return for an interval of zero")
+	}
+}
+
+func TestRunRefreshesRepeatedly(t *testing.T) {
+	var downloads atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloads.Add(1)
+		edition := r.URL.Query().Get("edition_id")
+		_, _ = w.Write(archive(t, map[string]string{
+			edition + "_20240101/" + edition + ".mmdb": edition + " data",
+		}))
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	u := &Updater{
+		LicenseKey: "secret",
+		Interval:   20 * time.Millisecond,
+		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reloads := make(chan struct{}, 8)
+	go u.Run(ctx, func() error {
+		select {
+		case reloads <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+
+	// Three refreshes prove the timer is armed again after each one.
+	for i := range 3 {
+		select {
+		case <-reloads:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for refresh %d", i+1)
+		}
+	}
+
+	if got := downloads.Load(); got < 3 {
+		t.Errorf("expected at least 3 downloads, got %d", got)
+	}
+}
