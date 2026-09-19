@@ -188,7 +188,7 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 
 func notFoundHandler(_ http.ResponseWriter, r *http.Request) *AppError {
 	err := notFound(nil).WithMessage("404 page not found")
-	if r.Header.Get("Accept") == jsonMediaType {
+	if acceptsMediaType(r, jsonMediaType) {
 		err = err.AsJSON()
 	}
 	return err
