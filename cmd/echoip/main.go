@@ -23,9 +23,8 @@ import (
 // list.
 const licenseKeyEnv = "GEOIP_LICENSE_KEY"
 
-// MaxMind rebuilds GeoLite2 twice a week. A daily check keeps the data at most
-// a day behind, and costs nothing while the edition is unchanged, because the
-// request is conditional.
+// MaxMind rebuilds GeoLite2 twice a week, and a check costs nothing while the
+// edition is unchanged.
 const defaultUpdateInterval = 24 * time.Hour
 
 type options struct {
@@ -115,9 +114,7 @@ func main() {
 		}
 	}
 
-	// A database that is missing or broken only disables the lookups that need
-	// it. The server keeps serving and picks the database up once a refresh
-	// succeeds.
+	// A missing or broken database only disables the lookups that need it.
 	geoReader, err := geo.Open(opts.cityFile, opts.asnFile)
 	if err != nil {
 		log.Printf("GeoIP lookups are limited: %v", err)

@@ -7,8 +7,8 @@ import (
 	"net/http"
 )
 
-// appHandler reports the error instead of writing it, so every handler answers
-// in one style. ServeHTTP renders it.
+// appHandler returns its error for ServeHTTP to render, so every handler
+// answers in one style.
 type appHandler func(http.ResponseWriter, *http.Request) *AppError
 
 func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

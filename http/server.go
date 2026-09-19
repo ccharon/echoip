@@ -56,7 +56,7 @@ type Server struct {
 }
 
 // New builds the server. Templates are parsed once, and a template that fails
-// to parse disables the browser page rather than the whole server.
+// to parse leaves the browser page disabled.
 func New(cfg Config, geoReader geo.Reader, cache *Cache) *Server {
 	s := &Server{cfg: cfg, geo: geoReader, cache: cache}
 

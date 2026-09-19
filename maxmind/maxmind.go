@@ -79,9 +79,8 @@ func (u *Updater) oldest() time.Duration {
 	return oldest
 }
 
-// nextRefresh returns how long to wait for the next download. It counts from
-// the age of the databases rather than from now, so a restart does not push
-// the refresh a full Interval into the future.
+// nextRefresh returns how long to wait, counted from the age of the databases
+// so that a restart does not delay it.
 func (u *Updater) nextRefresh() time.Duration {
 	if remaining := u.Interval - u.oldest(); remaining > 0 {
 		return remaining

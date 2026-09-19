@@ -1,15 +1,11 @@
 # Build
-# BUILDPLATFORM and TARGET* are filled in by BuildKit. The Makefile passes the
-# build platform for the classic builder, which leaves the target empty and so
-# builds for the machine it runs on.
+# Empty TARGET* values build for the builder itself.
 ARG BUILDPLATFORM
 FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm AS build
 WORKDIR /go/src/github.com/ccharon/echoip
 COPY . .
 
-# Built on the native builder and cross compiled for the target, so no
-# emulation is involved. Tests run in CI, which is where a binary can be
-# executed on the machine that built it.
+# Cross compiled from the builder platform, so nothing is emulated.
 ARG TARGETOS TARGETARCH
 
 # Must build without cgo because libc is unavailable in runtime image
