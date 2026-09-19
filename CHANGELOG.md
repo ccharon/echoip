@@ -22,6 +22,7 @@
 
 ### Fixed
 
+- `country_eu` follows the country of the address alone. The registered country says where the block is registered, not where it is used, so a block registered in the EU and used elsewhere reported `true`.
 - The request line on the page keeps `?ip=` when the page was opened for another address. It was built from the input field alone, which starts empty.
 
 ### Documentation
