@@ -24,10 +24,12 @@ import (
 // version is set at build time from the git tag.
 var version = "dev"
 
-// licenseKeyEnv holds the MaxMind license key. It is read from the
-// environment rather than a flag, because flags are visible in the process
-// list.
-const licenseKeyEnv = "GEOIP_LICENSE_KEY"
+// The MaxMind credentials. They are read from the environment rather than
+// from flags, because flags are visible in the process list.
+const (
+	accountIDEnv  = "MAXMIND_ACCOUNT_ID"
+	licenseKeyEnv = "GEOIP_LICENSE_KEY"
+)
 
 // MaxMind rebuilds GeoLite2 twice a week, and a check costs nothing while the
 // edition is unchanged.
@@ -79,7 +81,8 @@ func parseFlags(args []string, output io.Writer) (*options, error) {
 	fs.IntVar(&opts.cacheSize, "C", 0, "Size of the response cache. 0 disables caching")
 	fs.BoolVar(&opts.profile, "P", false, "Register the pprof and cache handlers below /debug")
 	fs.DurationVar(&opts.updateInterval, "u", defaultUpdateInterval,
-		"Interval for checking MaxMind for new GeoIP databases. Requires "+licenseKeyEnv+". 0 disables checking")
+		"Interval for checking MaxMind for new GeoIP databases. Requires "+accountIDEnv+" and "+
+			licenseKeyEnv+". 0 disables checking")
 	fs.BoolVar(&opts.showVersion, "V", false, "Print the version and exit")
 	fs.Func("H", "Header to trust for the remote IP, e.g. X-Real-IP. May be repeated", func(v string) error {
 		opts.headers = append(opts.headers, v)
@@ -143,12 +146,17 @@ func main() {
 	log.Printf("echoip %s", version)
 
 	updater := &maxmind.Updater{
+		AccountID:  os.Getenv(accountIDEnv),
 		LicenseKey: os.Getenv(licenseKeyEnv),
 		Interval:   opts.updateInterval,
 		Databases:  editions(opts.cityFile, opts.asnFile),
 	}
-	if len(updater.Databases) > 0 && updater.LicenseKey == "" {
-		log.Fatalf("%s must be set to download the GeoIP databases", licenseKeyEnv)
+	if len(updater.Databases) > 0 {
+		for env, value := range map[string]string{accountIDEnv: updater.AccountID, licenseKeyEnv: updater.LicenseKey} {
+			if value == "" {
+				log.Fatalf("%s must be set to download the GeoIP databases", env)
+			}
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

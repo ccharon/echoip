@@ -2,6 +2,7 @@
 /vendor/
 .vscode/
 /bin/
+/maxmind-accountid.txt
 /maxmind-license.txt
 .idea/
 /CLAUDE.md

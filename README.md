@@ -17,12 +17,14 @@ a fork of [mpolden/echoip](https://github.com/mpolden/echoip).
 
 The container downloads the GeoLite2 databases on first start and checks for
 new ones once a day. They live in a mounted volume, which keeps them across
-restarts and out of the image. This needs a MaxMind license key, free after
-registration at [maxmind.com](https://www.maxmind.com).
+restarts and out of the image. This needs a MaxMind account, free after
+registration at [maxmind.com](https://www.maxmind.com). Both the account ID and
+a license key are required, because the download authenticates with them.
 
-Put the key in a `.env` file next to `docker-compose.yml`:
+Put them in a `.env` file next to `docker-compose.yml`:
 
 ```
+MAXMIND_ACCOUNT_ID=your-account-id
 GEOIP_LICENSE_KEY=your-key
 ```
 
@@ -112,7 +114,8 @@ $ curl echoip.example.com/json
 
 | Name | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `GEOIP_LICENSE_KEY` | environment | none | MaxMind license key. Required when `-c` or `-a` is set, otherwise the server exits on start. |
+| `MAXMIND_ACCOUNT_ID` | environment | none | MaxMind account ID. Required when `-c` or `-a` is set, otherwise the server exits on start. |
+| `GEOIP_LICENSE_KEY` | environment | none | MaxMind license key. Required alongside the account ID. |
 | `-a` | string | none | Path to the GeoIP ASN database |
 | `-c` | string | none | Path to the GeoIP city database |
 | `-u` | duration | `24h` | Interval for checking MaxMind for new databases. `0` disables checking. |
@@ -126,9 +129,9 @@ $ curl echoip.example.com/json
 `-V` prints the version and exits. The image sets `-c`, `-a`, `-r`, `-C 1000`
 and `-H X-Real-IP` in its `ENTRYPOINT`, so the table describes the binary.
 
-`-c` and `-a` also tell the updater where to write. The license key is read
-from the environment rather than a flag, because flags are visible in the
-process list. The browser page is built into the binary, so there is nothing to
+`-c` and `-a` also tell the updater where to write. The credentials are read
+from the environment rather than from flags, because flags are visible in the
+process list. They are sent as HTTP basic auth, so no URL carries them. The browser page is built into the binary, so there is nothing to
 point at a template directory.
 
 `-T` takes CIDR notation or a single address. A network with host bits set is
@@ -146,7 +149,7 @@ The service answers unauthenticated requests from anyone.
 | Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`. |
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it. |
 | The container runs as an unprivileged user | UID 65532, with a read-only root filesystem, no capabilities and `no-new-privileges`. |
-| The license key never reaches a log | It is read from the environment, and errors are stripped of the request URL that carries it. |
+| The credentials never reach a log | They are read from the environment and sent in an `Authorization` header, and errors are stripped of the request URL. |
 | Refused requests are logged | Every 4xx and 5xx is written with the peer address, the method, the target and the reason, quoted and cut at 128 characters. |
 
 Set `-H` only for headers the proxy overwrites, otherwise a caller picks the
@@ -154,7 +157,7 @@ address they are shown data for. `-T` narrows that to the networks the proxy
 connects from.
 
 `-P` registers handlers below `/debug` that are unauthenticated.
-`/debug/pprof/heap` hands out memory contents, which include the license key.
+`/debug/pprof/heap` hands out memory contents, which include the credentials.
 Keep the listening address unreachable from the internet while they are on.
 
 ## Limitations
