@@ -5,7 +5,6 @@ import (
 	"math/big"
 	"net/http"
 	"net/netip"
-	"path"
 	"strconv"
 
 	"github.com/ccharon/echoip/iputil"
@@ -30,12 +29,6 @@ type Response struct {
 	ASNOrg     string               `json:"asn_org,omitempty"`
 	Hostname   string               `json:"hostname,omitempty"`
 	UserAgent  *useragent.UserAgent `json:"user_agent,omitempty"`
-}
-
-type PortResponse struct {
-	IP        netip.Addr `json:"ip"`
-	Port      uint16     `json:"port"`
-	Reachable bool       `json:"reachable"`
 }
 
 // Coordinates formats latitude and longitude the way the CLI response prints
@@ -98,31 +91,4 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 	response.UserAgent = userAgentFromRequest(r)
 
 	return response, nil
-}
-
-func (s *Server) newPortResponse(r *http.Request) (PortResponse, error) {
-	lastElement := path.Base(r.URL.Path)
-
-	parsed, err := strconv.ParseUint(lastElement, 10, 16)
-	if err != nil || parsed == 0 {
-		return PortResponse{}, fmt.Errorf("invalid port: %s", lastElement)
-	}
-	port := uint16(parsed)
-
-	addr, err := ipFromRequest(s.cfg.IPHeaders, r, false)
-	if err != nil {
-		return PortResponse{Port: port}, err
-	}
-
-	// Answering for an address the service must not connect to would turn the
-	// check into a scanner for the network around it.
-	if !iputil.Routable(addr) {
-		return PortResponse{Port: port}, fmt.Errorf("cannot check %s", addr)
-	}
-
-	return PortResponse{
-		IP:        addr,
-		Port:      port,
-		Reachable: s.cfg.LookupPort(addr, port) == nil,
-	}, nil
 }

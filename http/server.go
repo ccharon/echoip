@@ -43,8 +43,6 @@ type Config struct {
 	// LookupAddr resolves the hostname of an address. Nil leaves the hostname
 	// out of the response.
 	LookupAddr func(netip.Addr) (string, error)
-	// LookupPort reports whether a port is reachable. Nil disables /port.
-	LookupPort func(netip.Addr, uint16) error
 	// Profile registers the cache and pprof handlers below /debug.
 	Profile bool
 }
@@ -104,10 +102,6 @@ func (s *Server) Handler() http.Handler {
 
 	if s.template != nil {
 		r.Route("GET", "/", s.browserHandler)
-	}
-
-	if s.cfg.LookupPort != nil {
-		r.RoutePrefix("GET", "/port/", s.portHandler)
 	}
 
 	if s.cfg.Profile {

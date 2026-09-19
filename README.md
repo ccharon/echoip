@@ -66,7 +66,6 @@ networks:
 | `-t` | string | `html` | Path to the template directory |
 | `-H` | string | unset | Header to trust for the remote IP, e.g. `X-Real-IP`. May be repeated. |
 | `-r` | bool | `false` | Perform reverse hostname lookups |
-| `-p` | bool | `false` | Enable port lookup |
 | `-C` | int | `0` | Size of the response cache. `0` disables caching. |
 | `-P` | bool | `false` | Enable profiling handlers |
 
@@ -107,7 +106,7 @@ offers is what matters.
 
 | Measure | Effect |
 | --- | --- |
-| `/port/` only accepts routable targets | Loopback, private, link local, multicast and carrier grade NAT addresses are refused, so a caller who controls the trusted header cannot aim the check at the network around the service. |
+| The service opens no outbound connections | It answers from the GeoIP databases only, so a caller cannot make it reach an address of their choosing. |
 | Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`. |
 | Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`, so an injected script is refused. The hashes are taken from the rendered page at startup. |
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it, and only moved into place when it matches. |
@@ -118,9 +117,10 @@ offers is what matters.
 unauthenticated and expose memory contents, so the listening address must not
 be reachable from the internet while they are on.
 
-The trusted headers from `-H` decide which address the service reports and
-checks. Set them only for headers the proxy in front of the service
-overwrites, otherwise a caller can choose the address they are treated as.
+The trusted headers from `-H` decide which address the service reports. Set
+them only for headers the proxy in front of the service overwrites, otherwise a
+caller can choose the address they are shown data for. That address is only
+looked up, never contacted.
 
 `make vulncheck` runs govulncheck against the module.
 
@@ -206,17 +206,6 @@ $ curl -L -H 'Accept: application/json' echoip.yoursite.com  # or curl -L echoip
   "ip_decimal": 2130706433,
   "asn": "AS59795",
   "asn_org": "Hosting4Real"
-}
-```
-
-### Port testing:
-
-```
-$ curl -L echoip.yoursite.com/port/80
-{
-  "ip": "127.0.0.1",
-  "port": 80,
-  "reachable": false
 }
 ```
 

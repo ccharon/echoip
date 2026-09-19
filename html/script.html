@@ -8,7 +8,6 @@
         const endpoints = document.getElementById("endpoints");
         const command = document.getElementById("command");
         const output = document.getElementById("output");
-        const portField = document.getElementById("port");
         const ipField = document.getElementById("ip");
 
         let path = "";
@@ -17,9 +16,8 @@
         function request() {
             const address = ipField.value.trim();
             const query = address ? "?ip=" + encodeURIComponent(address) : "";
-            const port = path === "port" ? "/" + (portField.value || "0") : "";
 
-            return `/${path}${port}${query}`;
+            return `/${path}${query}`;
         }
 
         function render() {
@@ -38,8 +36,6 @@
                     return response.ip;
                 case "json":
                     return JSON.stringify(response, null, 2);
-                case "port":
-                    return "Open the request to check the port.";
                 default: {
                     const value = response[path.replace("-", "_")];
                     return value === undefined || value === "" ? "(not available for this address)" : String(value);
@@ -52,7 +48,6 @@
             for (const chip of endpoints.querySelectorAll(".chip")) {
                 chip.setAttribute("aria-pressed", String(chip === button));
             }
-            portField.hidden = path !== "port";
             render();
         }
 
@@ -63,7 +58,6 @@
             }
         });
 
-        portField.addEventListener("input", render);
         ipField.addEventListener("input", render);
 
         document.getElementById("open").addEventListener("click", function () {

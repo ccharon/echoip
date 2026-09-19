@@ -13,7 +13,6 @@ import (
 )
 
 func lookupAddr(netip.Addr) (string, error) { return "localhost", nil }
-func lookupPort(netip.Addr, uint16) error   { return nil }
 
 type testDb struct{}
 
@@ -40,7 +39,7 @@ func (t *pendingDb) HasCity() bool { return t.city }
 func (t *pendingDb) HasASN() bool  { return t.asn }
 
 func testServer() *Server {
-	cfg := Config{LookupAddr: lookupAddr, LookupPort: lookupPort}
+	cfg := Config{LookupAddr: lookupAddr}
 	return New(cfg, &testDb{}, NewCache(100))
 }
 
@@ -133,7 +132,6 @@ func TestCLIHandlers(t *testing.T) {
 func TestDisabledHandlers(t *testing.T) {
 	log.SetOutput(io.Discard)
 	server := testServer()
-	server.cfg.LookupPort = nil
 	server.cfg.LookupAddr = nil
 	server.geo, _ = geo.Open("", "")
 	s := httptest.NewServer(server.Handler())
@@ -143,7 +141,6 @@ func TestDisabledHandlers(t *testing.T) {
 		out    string
 		status int
 	}{
-		{s.URL + "/port/1337", "404 page not found", 404},
 		{s.URL + "/country", "404 page not found", 404},
 		{s.URL + "/country-iso", "404 page not found", 404},
 		{s.URL + "/city", "404 page not found", 404},
@@ -176,10 +173,7 @@ func TestJSONHandlers(t *testing.T) {
 		status int
 	}{
 		{s.URL, "{\n  \"ip\": \"127.0.0.1\",\n  \"ip_decimal\": 2130706433,\n  \"country\": \"Elbonia\",\n  \"country_iso\": \"EB\",\n  \"country_eu\": false,\n  \"region_name\": \"North Elbonia\",\n  \"region_code\": \"1234\",\n  \"metro_code\": 1234,\n  \"zip_code\": \"1234\",\n  \"city\": \"Bornyasherk\",\n  \"latitude\": 63.416667,\n  \"longitude\": 10.416667,\n  \"time_zone\": \"Europe/Bornyasherk\",\n  \"asn\": \"AS59795\",\n  \"asn_org\": \"Hosting4Real\",\n  \"hostname\": \"localhost\",\n  \"user_agent\": {\n    \"product\": \"curl\",\n    \"version\": \"7.2.6.0\",\n    \"raw_value\": \"curl/7.2.6.0\"\n  }\n}", 200},
-		{s.URL + "/port/foo", "{\n  \"status\": 400,\n  \"error\": \"invalid port: foo\"\n}", 400},
-		{s.URL + "/port/0", "{\n  \"status\": 400,\n  \"error\": \"invalid port: 0\"\n}", 400},
-		{s.URL + "/port/65537", "{\n  \"status\": 400,\n  \"error\": \"invalid port: 65537\"\n}", 400},
-		{s.URL + "/port/31337", "{\n  \"status\": 400,\n  \"error\": \"cannot check 127.0.0.1\"\n}", 400}, // the caller is not a routable target
+		{s.URL + "/port/1337", "{\n  \"status\": 404,\n  \"error\": \"404 page not found\"\n}", 404},
 		{s.URL + "/foo", "{\n  \"status\": 404,\n  \"error\": \"404 page not found\"\n}", 404},
 		{s.URL + "/health", `{"status":"OK"}`, 200},
 	}
@@ -270,63 +264,5 @@ func TestGeoHandlersFollowDatabase(t *testing.T) {
 	}
 	if want := "Elbonia\n"; out != want {
 		t.Errorf("Expected %q, got %q", want, out)
-	}
-}
-
-// portServer trusts X-Real-IP, so a test can present a routable address.
-func portServer() *Server {
-	server := testServer()
-	server.cfg.IPHeaders = []string{"X-Real-IP"}
-	return server
-}
-
-func TestPortHandler(t *testing.T) {
-	log.SetOutput(io.Discard)
-	s := httptest.NewServer(portServer().Handler())
-	defer s.Close()
-
-	tests := []struct {
-		url    string
-		header string
-		out    string
-		status int
-	}{
-		{s.URL + "/port/31337", "1.3.3.7", "{\n  \"ip\": \"1.3.3.7\",\n  \"port\": 31337,\n  \"reachable\": true\n}", 200},
-		// The ip parameter must not aim the check at another host.
-		{s.URL + "/port/80?ip=9.9.9.9", "1.3.3.7", "{\n  \"ip\": \"1.3.3.7\",\n  \"port\": 80,\n  \"reachable\": true\n}", 200},
-		// Neither must the trusted header, which a caller controls whenever it
-		// reaches the server without a proxy in front of it.
-		{s.URL + "/port/22", "127.0.0.1", "{\n  \"status\": 400,\n  \"error\": \"cannot check 127.0.0.1\"\n}", 400},
-		{s.URL + "/port/22", "10.0.0.1", "{\n  \"status\": 400,\n  \"error\": \"cannot check 10.0.0.1\"\n}", 400},
-		{s.URL + "/port/22", "169.254.169.254", "{\n  \"status\": 400,\n  \"error\": \"cannot check 169.254.169.254\"\n}", 400},
-		{s.URL + "/port/22", "100.64.1.1", "{\n  \"status\": 400,\n  \"error\": \"cannot check 100.64.1.1\"\n}", 400},
-		{s.URL + "/port/22", "::1", "{\n  \"status\": 400,\n  \"error\": \"cannot check ::1\"\n}", 400},
-		{s.URL + "/port/22", "fc00::1", "{\n  \"status\": 400,\n  \"error\": \"cannot check fc00::1\"\n}", 400},
-	}
-
-	for _, tt := range tests {
-		r, err := http.NewRequest(http.MethodGet, tt.url, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r.Header.Set("X-Real-IP", tt.header)
-		r.Header.Set("Accept", jsonMediaType)
-
-		res, err := http.DefaultClient.Do(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := io.ReadAll(res.Body)
-		_ = res.Body.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if res.StatusCode != tt.status {
-			t.Errorf("%s from %s: expected %d, got %d", tt.url, tt.header, tt.status, res.StatusCode)
-		}
-		if string(body) != tt.out {
-			t.Errorf("%s from %s: expected %q, got %q", tt.url, tt.header, tt.out, body)
-		}
 	}
 }
