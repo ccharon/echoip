@@ -129,6 +129,136 @@ func TestCLIHandlers(t *testing.T) {
 	}
 }
 
+// HEAD has to answer like GET, because monitoring uses it on /health.
+func TestHeadRequests(t *testing.T) {
+	log.SetOutput(io.Discard)
+	s := httptest.NewServer(testServer().Handler())
+
+	for _, path := range []string{"/health", "/", "/ip", "/json", "/country"} {
+		r, err := http.NewRequest("HEAD", s.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("User-Agent", "curl/7.43.0")
+
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+
+		if res.StatusCode != 200 {
+			t.Errorf("HEAD %s: expected 200, got %d", path, res.StatusCode)
+		}
+		if len(body) != 0 {
+			t.Errorf("HEAD %s: expected no body, got %q", path, body)
+		}
+	}
+
+	// A path that does not exist stays a 404 for HEAD as well.
+	res, err := http.DefaultClient.Head(s.URL + "/nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != 404 {
+		t.Errorf("HEAD /nope: expected 404, got %d", res.StatusCode)
+	}
+}
+
+// A refused request is the only trace a probe leaves, so it has to reach the
+// log with the peer address, the target and the reason.
+func TestRefusedRequestIsLogged(t *testing.T) {
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(io.Discard)
+
+	s := httptest.NewServer(testServer().Handler())
+	if _, _, err := httpGet(s.URL+"/ip?ip=10.0.0.5", "", "curl/7.43.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	line := logged.String()
+	for _, want := range []string{"127.0.0.1", "GET", "/ip?ip=10.0.0.5", "400", "not a public IP"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("expected %q in the log line %q", want, line)
+		}
+	}
+}
+
+// The query value reaches the log through the error message, decoded, so a
+// newline in it would forge a second line.
+func TestLogLineCannotBeForged(t *testing.T) {
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(io.Discard)
+
+	s := httptest.NewServer(testServer().Handler())
+	forged := "%0a2026/01/01%2000:00:00%20echoip:%20forged"
+	if _, _, err := httpGet(s.URL+"/ip?ip="+forged, "", "curl/7.43.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	out := logged.String()
+	if lines := strings.Count(strings.TrimSuffix(out, "\n"), "\n"); lines != 0 {
+		t.Errorf("expected one line, got %d extra: %q", lines, out)
+	}
+	if !strings.Contains(out, `\n2026/01/01`) {
+		t.Errorf("expected the newline to be escaped in %q", out)
+	}
+}
+
+// One request must not be able to write an arbitrarily long line.
+func TestLogLineIsBounded(t *testing.T) {
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(io.Discard)
+
+	s := httptest.NewServer(testServer().Handler())
+	if _, _, err := httpGet(s.URL+"/ip?ip="+strings.Repeat("A", 4000), "", "curl/7.43.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	if out := logged.String(); len(out) > 512 {
+		t.Errorf("expected a bounded line, got %d bytes", len(out))
+	} else if !strings.Contains(out, "...") {
+		t.Errorf("expected the value to be clipped in %q", out)
+	}
+}
+
+func TestPrivateIPParameter(t *testing.T) {
+	log.SetOutput(io.Discard)
+	s := httptest.NewServer(testServer().Handler())
+
+	want := "{\n  \"status\": 400,\n  \"error\": \"not a public IP: 10.0.0.5\"\n}"
+	for _, path := range []string{"/", "/ip", "/json", "/country", "/asn"} {
+		out, status, err := httpGet(s.URL+path+"?ip=10.0.0.5", "", "curl/7.43.0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status != 400 {
+			t.Errorf("%s: expected 400, got %d", path, status)
+		}
+		if out != want {
+			t.Errorf("%s: expected %q, got %q", path, want, out)
+		}
+	}
+
+	// The browser page answers in plain text, since it renders no page for a
+	// request it refuses.
+	out, status, err := httpGet(s.URL+"?ip=10.0.0.5", "", "Mozilla/5.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 400 {
+		t.Errorf("browser: expected 400, got %d", status)
+	}
+	if want := "not a public IP: 10.0.0.5"; out != want {
+		t.Errorf("browser: expected %q, got %q", want, out)
+	}
+}
+
 func TestDisabledHandlers(t *testing.T) {
 	log.SetOutput(io.Discard)
 	server := testServer()
