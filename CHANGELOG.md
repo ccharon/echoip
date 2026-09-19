@@ -12,7 +12,7 @@
 
 ### Added
 
-- Every refused or failed request is logged with the time, the peer address, the method, the target and the reason. Successful ones stay out of the log, which the proxy records.
+- Every refused or failed request is logged with the time, the peer address, the method, the target and the reason. The target and the reason are quoted and cut at 128 characters, so a newline in `?ip=` cannot forge a line. Successful requests stay out of the log, which the proxy records.
 
 ### Changed
 

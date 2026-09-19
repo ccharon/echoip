@@ -41,9 +41,21 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // logRefused records every request that was refused or failed, which is the
 // only trace an attempt to probe the service leaves. The peer address is
-// logged rather than the reported one, because a caller cannot choose it.
+// logged rather than the reported one, because a caller cannot choose it. The
+// target and the reason are quoted, because a caller picks their content and a
+// raw newline would forge a second line.
 func logRefused(r *http.Request, e *AppError) {
-	log.Printf("%s %s %q -> %d: %s", r.RemoteAddr, r.Method, r.URL.RequestURI(), e.Code, e.Error())
+	log.Printf("%s %s %q -> %d: %q", r.RemoteAddr, r.Method, clip(r.URL.RequestURI()), e.Code, clip(e.Error()))
+}
+
+// clip bounds a value a caller controls, so one request cannot fill the log
+// with a single line.
+func clip(s string) string {
+	const max = 128
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 func wrapHandlerFunc(f http.HandlerFunc) appHandler {

@@ -187,6 +187,46 @@ func TestRefusedRequestIsLogged(t *testing.T) {
 	}
 }
 
+// The query value reaches the log through the error message, decoded, so a
+// newline in it would forge a second line.
+func TestLogLineCannotBeForged(t *testing.T) {
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(io.Discard)
+
+	s := httptest.NewServer(testServer().Handler())
+	forged := "%0a2026/01/01%2000:00:00%20echoip:%20forged"
+	if _, _, err := httpGet(s.URL+"/ip?ip="+forged, "", "curl/7.43.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	out := logged.String()
+	if lines := strings.Count(strings.TrimSuffix(out, "\n"), "\n"); lines != 0 {
+		t.Errorf("expected one line, got %d extra: %q", lines, out)
+	}
+	if !strings.Contains(out, `\n2026/01/01`) {
+		t.Errorf("expected the newline to be escaped in %q", out)
+	}
+}
+
+// One request must not be able to write an arbitrarily long line.
+func TestLogLineIsBounded(t *testing.T) {
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(io.Discard)
+
+	s := httptest.NewServer(testServer().Handler())
+	if _, _, err := httpGet(s.URL+"/ip?ip="+strings.Repeat("A", 4000), "", "curl/7.43.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	if out := logged.String(); len(out) > 512 {
+		t.Errorf("expected a bounded line, got %d bytes", len(out))
+	} else if !strings.Contains(out, "...") {
+		t.Errorf("expected the value to be clipped in %q", out)
+	}
+}
+
 func TestPrivateIPParameter(t *testing.T) {
 	log.SetOutput(io.Discard)
 	s := httptest.NewServer(testServer().Handler())

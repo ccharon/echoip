@@ -118,10 +118,12 @@ func suppliedAddr(v string) (netip.Addr, error) {
 	return addr, nil
 }
 
+// parseAddr names the value it rejected, bounded, because no address is longer
+// than an IPv6 one and the caller chose what to send.
 func parseAddr(s string) (netip.Addr, error) {
 	addr, err := netip.ParseAddr(s)
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("could not parse IP: %s", s)
+		return netip.Addr{}, fmt.Errorf("could not parse IP: %s", clip(s))
 	}
 	return addr.Unmap(), nil
 }
