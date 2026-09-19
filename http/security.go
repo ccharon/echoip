@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
-	"html/template"
 	"regexp"
 	"strings"
 )
@@ -22,10 +21,10 @@ var inlineBlock = regexp.MustCompile(`(?s)<(script|style)\b[^>]*>(.*?)</(?:scrip
 // contentSecurityPolicy describes what the browser page may load. The hashes
 // that allow its inline script and style cover the rendered page, because
 // html/template drops comments from those elements.
-func contentSecurityPolicy(t *template.Template) string {
+func contentSecurityPolicy() string {
 	var scripts, styles []string
 
-	for _, block := range inlineBlocks(t) {
+	for _, block := range inlineBlocks() {
 		source := "'sha256-" + hashOf(block.content) + "'"
 		if block.tag == "script" {
 			scripts = append(scripts, source)
@@ -53,13 +52,9 @@ type inlineContent struct {
 	content string
 }
 
-func inlineBlocks(t *template.Template) []inlineContent {
-	if t == nil {
-		return nil
-	}
-
+func inlineBlocks() []inlineContent {
 	var page bytes.Buffer
-	if err := t.ExecuteTemplate(&page, indexTemplate, &pageData{}); err != nil {
+	if err := pageTemplate.ExecuteTemplate(&page, indexTemplate, &pageData{}); err != nil {
 		return nil
 	}
 

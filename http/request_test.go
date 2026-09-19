@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +46,62 @@ func TestIPFromRequest(t *testing.T) {
 		}
 		if want := netip.MustParseAddr(tt.out); addr != want {
 			t.Errorf("Expected %s, got %s", want, addr)
+		}
+	}
+}
+
+func TestIPFromRequestRefusesSuppliedPrivate(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       string
+		headerValue string
+	}{
+		{"ip parameter", "?ip=10.0.0.5", ""},
+		{"ip parameter, mapped", "?ip=::ffff:192.168.1.1", ""},
+		{"ip parameter, loopback", "?ip=127.0.0.1", ""},
+		{"trusted header", "", "192.168.1.5"},
+		{"trusted header, first entry", "", "172.16.0.1, 1.3.3.7"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			u, err := url.Parse("http://203.0.113.9:9999" + tt.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := &http.Request{RemoteAddr: u.Host, Header: http.Header{}, URL: u}
+			if tt.headerValue != "" {
+				r.Header.Set("X-Forwarded-For", tt.headerValue)
+			}
+
+			server := &Server{cfg: Config{IPHeaders: []string{"X-Forwarded-For"}}}
+			addr, err := server.ipFromRequest(r, true)
+			if err == nil {
+				t.Fatalf("expected an error, got %s", addr)
+			}
+			if !strings.Contains(err.Error(), "not a public IP") {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// A peer on a local network is answered for its own address, which is what
+// keeps the service usable behind a LAN and on localhost.
+func TestIPFromRequestAllowsPrivatePeer(t *testing.T) {
+	for _, peer := range []string{"127.0.0.1:9999", "10.1.2.3:9999", "[fd00::1]:9999"} {
+		u, err := url.Parse("http://" + peer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &http.Request{RemoteAddr: u.Host, Header: http.Header{}, URL: u}
+
+		addr, err := (&Server{}).ipFromRequest(r, true)
+		if err != nil {
+			t.Fatalf("peer %s: %v", peer, err)
+		}
+		if want := netip.MustParseAddrPort(u.Host).Addr(); addr != want {
+			t.Errorf("peer %s: expected %s, got %s", peer, want, addr)
 		}
 	}
 }

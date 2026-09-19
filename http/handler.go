@@ -137,8 +137,7 @@ func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *App
 	}{fmt.Sprintf("Changed cache capacity to %d.", capacity)})
 }
 
-// browserHandler renders the HTML page. It is only registered when a template
-// was loaded.
+// browserHandler renders the HTML page.
 func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppError {
 	response, err := s.newResponse(r)
 	if err != nil {
@@ -160,7 +159,7 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		JSON:         string(jsonData),
 	}
 
-	if err := s.template.ExecuteTemplate(w, indexTemplate, &data); err != nil {
+	if err := pageTemplate.ExecuteTemplate(w, indexTemplate, &data); err != nil {
 		return internalServerError(err)
 	}
 	return nil

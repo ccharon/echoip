@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -23,9 +22,6 @@ func TestParseFlagsDefaults(t *testing.T) {
 
 	if opts.listen != ":8080" {
 		t.Errorf("listen = %q, want %q", opts.listen, ":8080")
-	}
-	if opts.templateDir != "html" {
-		t.Errorf("templateDir = %q, want %q", opts.templateDir, "html")
 	}
 	if opts.updateInterval != 24*time.Hour {
 		t.Errorf("updateInterval = %s, want %s", opts.updateInterval, 24*time.Hour)
@@ -100,8 +96,13 @@ func TestParsePrefix(t *testing.T) {
 		{"192.168.1.1", "192.168.1.1/32"},
 		{"::1", "::1/128"},
 		{"2001:db8::/32", "2001:db8::/32"},
-		// Host bits outside the mask are dropped.
-		{"10.1.2.3/8", "10.0.0.0/8"},
+		{"192.168.1.128/25", "192.168.1.128/25"},
+		{"0.0.0.0/0", "0.0.0.0/0"},
+		// A single address is unmapped, so it matches the address the server
+		// reads from a request.
+		{"::ffff:10.0.0.5", "10.0.0.5/32"},
+		// PrefixFrom drops the zone, which is what makes this match.
+		{"fe80::1%eth0", "fe80::1/128"},
 	}
 
 	for _, tt := range tests {
@@ -114,9 +115,17 @@ func TestParsePrefix(t *testing.T) {
 		}
 	}
 
-	for _, in := range []string{"", "localhost", "10.0.0.0/33", "300.1.1.1"} {
-		if _, err := parsePrefix(in); err == nil {
-			t.Errorf("expected an error for %q", in)
+	// Host bits, a dotted netmask and a mapped prefix are errors.
+	errors := []string{
+		"", "localhost", "10.0.0.0/33", "300.1.1.1",
+		"10.0.0.0/255.0.0.0",
+		"10.1.2.3/8",
+		"192.168.1.1/24",
+		"::ffff:192.168.0.0/120",
+	}
+	for _, in := range errors {
+		if got, err := parsePrefix(in); err == nil {
+			t.Errorf("expected an error for %q, got %s", in, got)
 		}
 	}
 }
@@ -149,22 +158,13 @@ func TestServerConfig(t *testing.T) {
 	log.SetOutput(io.Discard)
 	defer log.SetOutput(os.Stderr)
 
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("page"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
 	cfg := serverConfig(&options{
-		templateDir:    dir,
 		headers:        []string{"X-Real-IP"},
 		trustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 		reverseLookup:  true,
 		profile:        true,
 	})
 
-	if cfg.TemplateDir != dir {
-		t.Errorf("TemplateDir = %q, want %q", cfg.TemplateDir, dir)
-	}
 	if cfg.LookupAddr == nil {
 		t.Error("expected the reverse lookup to be set")
 	}
@@ -175,12 +175,7 @@ func TestServerConfig(t *testing.T) {
 		t.Errorf("TrustedProxies = %v", cfg.TrustedProxies)
 	}
 
-	// A template directory that is not there leaves the browser page out.
-	cfg = serverConfig(&options{templateDir: filepath.Join(dir, "absent")})
-	if cfg.TemplateDir != "" {
-		t.Errorf("TemplateDir = %q, want empty", cfg.TemplateDir)
-	}
-	if cfg.LookupAddr != nil {
+	if cfg = serverConfig(&options{}); cfg.LookupAddr != nil {
 		t.Error("expected no reverse lookup")
 	}
 }

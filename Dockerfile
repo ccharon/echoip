@@ -26,7 +26,6 @@ EXPOSE 8080
 # Needed to reach the MaxMind download endpoint over TLS
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/echoip /opt/echoip/
-COPY html /opt/echoip/html
 COPY --from=build --chown=65532:65532 /data /opt/echoip/data
 
 # Nothing here needs root. A named volume inherits the ownership of the

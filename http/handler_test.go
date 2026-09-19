@@ -129,6 +129,38 @@ func TestCLIHandlers(t *testing.T) {
 	}
 }
 
+func TestPrivateIPParameter(t *testing.T) {
+	log.SetOutput(io.Discard)
+	s := httptest.NewServer(testServer().Handler())
+
+	want := "{\n  \"status\": 400,\n  \"error\": \"not a public IP: 10.0.0.5\"\n}"
+	for _, path := range []string{"/", "/ip", "/json", "/country", "/asn"} {
+		out, status, err := httpGet(s.URL+path+"?ip=10.0.0.5", "", "curl/7.43.0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status != 400 {
+			t.Errorf("%s: expected 400, got %d", path, status)
+		}
+		if out != want {
+			t.Errorf("%s: expected %q, got %q", path, want, out)
+		}
+	}
+
+	// The browser page answers in plain text, since it renders no page for a
+	// request it refuses.
+	out, status, err := httpGet(s.URL+"?ip=10.0.0.5", "", "Mozilla/5.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 400 {
+		t.Errorf("browser: expected 400, got %d", status)
+	}
+	if want := "not a public IP: 10.0.0.5"; out != want {
+		t.Errorf("browser: expected %q, got %q", want, out)
+	}
+}
+
 func TestDisabledHandlers(t *testing.T) {
 	log.SetOutput(io.Discard)
 	server := testServer()
