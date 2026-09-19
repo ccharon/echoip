@@ -8,7 +8,8 @@ ASN data from the MaxMind GeoLite2 databases. The response format follows the
 `Accept` header and the user agent: plain text for CLI clients, JSON for
 `application/json`, an HTML page for browsers.
 
-Fork of https://github.com/leafcloudhq/echoip
+Fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/echoip), which is
+a fork of [mpolden/echoip](https://github.com/mpolden/echoip).
 
 ![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/doc/screenshot.png)
 
@@ -316,3 +317,14 @@ make run              # needs GEOIP_LICENSE_KEY
   conditional request still answers `304`. Delete the file to force a download.
 - `SIGTERM` and `SIGINT` stop the listener and give running requests up to 10
   seconds to finish.
+
+## License
+
+BSD 3-Clause, see [LICENSE](LICENSE). Copyright is held by Martin Polden for the
+original work and by Christian Charon for the changes in this fork. The commit
+history of both upstream repositories is kept in this repository.
+
+This product includes GeoLite2 data created by MaxMind, available from
+[maxmind.com](https://www.maxmind.com). The databases are subject to the
+[GeoLite2 End User License Agreement](https://www.maxmind.com/en/geolite2/eula)
+and are not distributed with this repository or its image.
