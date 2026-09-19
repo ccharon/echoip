@@ -3,54 +3,84 @@
 [![Docker pulls](https://img.shields.io/docker/pulls/ccharon/echoip.svg?label=docker+pulls)](https://hub.docker.com/r/ccharon/echoip)
 [![Docker stars](https://img.shields.io/docker/stars/ccharon/echoip.svg?label=docker+stars)](https://hub.docker.com/r/ccharon/echoip)
 
-
+HTTP service that returns the caller's IP address, enriched with location and
+ASN data from the MaxMind GeoLite2 databases. The response format follows the
+`Accept` header and the user agent: plain text for CLI clients, JSON for
+`application/json`, an HTML page for browsers.
 
 Fork of https://github.com/leafcloudhq/echoip
-
-- refreshed dependencies
-- removed country.mmdb as this information is also in city.mmdb
-- added docker-compose.yml
-- added nginx config
-- modified docker image to run with geoip data
-- modified page layout
 
 ![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/doc/screenshot.jpg)
 
 ## Run
-Before running this container you have to download your own geoip databases from [maxmind.com](https://www.maxmind.com). A free registration ist required.
 
-The databases required are: GeoLite2-City.mmdb and GeoLite2-ASN.mmdb. Be sure to mount the data directory containing the geoip databases into your docker image.
-See the docker-compose.yml
+The GeoLite2 databases are not part of the image. The container downloads them
+on first start and refreshes them every 14 days. This needs a MaxMind license
+key, available after free registration at
+[maxmind.com](https://www.maxmind.com), and a writable volume to keep the
+databases across restarts.
+
+Put the key in a `.env` file next to `docker-compose.yml`:
+
+```
+GEOIP_LICENSE_KEY=your-key
+```
+
+```bash
+docker compose up -d
+```
+
+The first start downloads about 80 MB before the server accepts requests.
 
 ```yaml
-version: "3"
 services:
   echoip:
     image: ccharon/echoip
     ports:
       - "127.0.0.1:8082:8080"
-    deploy:
-      resources:
-        limits:
-          cpus: "0.10"
-          memory: 128M
-        reservations:
-          cpus: "0.05"
-          memory: 64M
+    environment:
+      GEOIP_LICENSE_KEY: ${GEOIP_LICENSE_KEY:?set GEOIP_LICENSE_KEY in .env}
     container_name: echoip
     restart: unless-stopped
     volumes:
-      - ./data:/opt/echoip/data:ro
+      - geodata:/opt/echoip/data
     networks:
       - internal
+
+volumes:
+  geodata: {}
 
 networks:
   internal: {}
 ```
-to start run:
-```bash
-docker compose up -d 
-```
+
+## Configure
+
+| Name | Type | Default | Effect |
+| --- | --- | --- | --- |
+| `GEOIP_LICENSE_KEY` | environment | unset | MaxMind license key. Required when `-c` or `-a` is set, otherwise the server exits on start. |
+| `-a` | string | unset | Path to the GeoIP ASN database |
+| `-c` | string | unset | Path to the GeoIP city database |
+| `-u` | duration | `336h` | Interval for refreshing the databases. `0` disables refreshing. |
+| `-l` | string | `:8080` | Listening address |
+| `-t` | string | `html` | Path to the template directory |
+| `-H` | string | unset | Header to trust for the remote IP, e.g. `X-Real-IP`. May be repeated. |
+| `-r` | bool | `false` | Perform reverse hostname lookups |
+| `-p` | bool | `false` | Enable port lookup |
+| `-C` | int | `0` | Size of the response cache. `0` disables caching. |
+| `-P` | bool | `false` | Enable profiling handlers |
+
+The license key is read from the environment rather than a flag, because flags
+are visible in the process list.
+
+`-c` and `-a` also tell the updater where to write. The file named by `-c`
+receives the GeoLite2-City edition, the file named by `-a` GeoLite2-ASN.
+
+A missing database does not stop the server. It starts, answers `/`, `/ip` and
+`/json` without geo data, and downloads the databases in the background.
+`/country`, `/country-iso`, `/city` and `/coordinates` answer `404` until the
+city database is in place, `/asn` until the ASN database is. They start working
+without a restart.
 
 ## Nginx configuration
 
@@ -101,19 +131,10 @@ You can run this server with your own domain.
 ```
 $ curl -L echoip.yoursite.com
 127.0.0.1
-
-$ http echoip.yoursite.com
-127.0.0.1
-
-$ wget -qO- echoip.yoursite.com
-127.0.0.1
-
-$ fetch -qo- https://echoip.yoursite.com
-127.0.0.1
-
-$ bat -print=b echoip.yoursite.com/ip
-127.0.0.1
 ```
+
+Pass the appropriate flag (usually `-4` and `-6`) to your client to switch
+between IPv4 and IPv6 lookup.
 
 ### Country and city lookup:
 
@@ -157,27 +178,22 @@ $ curl -L echoip.yoursite.com/port/80
 }
 ```
 
-Pass the appropriate flag (usually `-4` and `-6`) to your client to switch
-between IPv4 and IPv6 lookup.
+## Development
 
-
-### Usage
-
+```bash
+make lint test
+make geoip-download   # needs GEOIP_LICENSE_KEY
+make run              # needs GEOIP_LICENSE_KEY
 ```
-$ echoip -h
-Usage of echoip:
-  -C int
-    	Size of response cache. Set to 0 to disable
-  -H value
-    	Header to trust for remote IP, if present (e.g. X-Real-IP)
-  -a string
-    	Path to GeoIP ASN database
-  -c string
-    	Path to GeoIP city database
-  -l string
-    	Listening address (default ":8080")
-  -p	Enable port lookup
-  -r	Perform reverse hostname lookups
-  -t string
-    	Path to template directory (default "html")
-```
+
+## Limitations
+
+- The refresh runs in process. A container that is restarted more often than
+  the refresh interval downloads the databases again whenever the volume is
+  empty.
+- MaxMind publishes GeoLite2 updates twice a week. A 14 day interval means the
+  data can be up to two weeks behind.
+- A failed refresh is logged and retried after 15 minutes. The previously
+  downloaded databases stay in use.
+- `SIGTERM` and `SIGINT` stop the listener and give running requests up to 10
+  seconds to finish.
