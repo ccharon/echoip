@@ -62,7 +62,9 @@ func (r *Route) MatcherFunc(f func(*http.Request) bool) *Route {
 }
 
 func (r *Route) match(req *http.Request) bool {
-	if req.Method != r.method {
+	// HEAD asks for the headers a GET would send. net/http drops the body.
+	head := req.Method == http.MethodHead && r.method == http.MethodGet
+	if req.Method != r.method && !head {
 		return false
 	}
 	if r.prefix {

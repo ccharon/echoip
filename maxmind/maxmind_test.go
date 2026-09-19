@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -764,5 +765,74 @@ func TestChecksumErrorHidesLicenseKey(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "super-secret") {
 		t.Errorf("error leaks the license key: %v", err)
+	}
+}
+
+// The license key is a query parameter, so a redirect that changes the scheme
+// would hand it to whoever answers.
+func TestUpdateRefusesSchemeChange(t *testing.T) {
+	// A working https target, so the refusal is about the scheme and not about
+	// the certificate.
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirect.Close()
+	defer swapDownloadURL(redirect.URL)()
+
+	u := &Updater{
+		LicenseKey: "super-secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "db.mmdb")},
+	}
+	_, err := u.Update(context.Background())
+	if err == nil {
+		t.Fatal("expected the redirect to be refused")
+	}
+	if !strings.Contains(err.Error(), "refusing redirect") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if strings.Contains(err.Error(), "super-secret") {
+		t.Errorf("error leaks the license key: %v", err)
+	}
+}
+
+// A redirect that keeps the scheme is followed, so the check does not break an
+// ordinary move of the endpoint.
+func TestUpdateFollowsSameSchemeRedirect(t *testing.T) {
+	archive := archive(t, map[string]string{"GeoLite2-ASN_20240101/GeoLite2-ASN.mmdb": "payload"})
+	sum := sha256.Sum256(archive)
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("suffix") == "tar.gz.sha256" {
+			_, _ = w.Write([]byte(hex.EncodeToString(sum[:]) + "  GeoLite2-ASN.tar.gz"))
+			return
+		}
+		_, _ = w.Write(archive)
+	}))
+	defer target.Close()
+
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"?"+r.URL.RawQuery, http.StatusFound)
+	}))
+	defer redirect.Close()
+	defer swapDownloadURL(redirect.URL)()
+
+	path := filepath.Join(t.TempDir(), "db.mmdb")
+	u := &Updater{
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+	updated, err := u.Update(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated {
+		t.Error("expected the database to be written")
 	}
 }

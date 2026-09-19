@@ -17,9 +17,7 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if e.Code/100 == 5 {
-		log.Println(e.Err)
-	}
+	logRefused(r, e)
 
 	message := e.Message
 	if e.IsJSON() {
@@ -39,6 +37,13 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(e.Code)
 	writeRaw(w, message)
+}
+
+// logRefused records every request that was refused or failed, which is the
+// only trace an attempt to probe the service leaves. The peer address is
+// logged rather than the reported one, because a caller cannot choose it.
+func logRefused(r *http.Request, e *AppError) {
+	log.Printf("%s %s %q -> %d: %s", r.RemoteAddr, r.Method, r.URL.RequestURI(), e.Code, e.Error())
 }
 
 func wrapHandlerFunc(f http.HandlerFunc) appHandler {

@@ -136,10 +136,22 @@ The service answers unauthenticated requests from anyone.
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it, and only moved into place when it matches. |
 | The container runs as an unprivileged user | UID 65532, with a read-only root filesystem, no capabilities and `no-new-privileges`. |
 | The license key never reaches a log | It is read from the environment, and errors are stripped of the request URL that carries it. |
+| Refused requests are logged | Every 4xx and 5xx is written with the peer address, the method, the target and the reason, so an attempt to probe the service leaves a trace. |
 
 `-P` registers pprof and cache handlers below `/debug`. They are
-unauthenticated and expose memory contents, so the listening address must not
-be reachable from the internet while they are on.
+unauthenticated, `/debug/pprof/heap` hands out memory contents, which include
+the license key, and `POST /debug/cache/resize` changes the cache without
+asking. The listening address must not be reachable from the internet while
+they are on.
+
+Successful requests are not logged, because the proxy in front already records
+them. Refused and failed ones are, in one line each:
+
+```
+echoip: 203.0.113.9:54321 GET "/ip?ip=10.0.0.5" -> 400: not a public IP: 10.0.0.5
+```
+
+The address is the one the connection came from, not the one a header claims.
 
 The trusted headers from `-H` decide which address the service reports. Set
 them only for headers the proxy in front of the service overwrites, otherwise a

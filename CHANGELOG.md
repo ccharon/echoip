@@ -21,6 +21,7 @@ Changes since the fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/ec
 - Reverse lookup (`-r`) and the response cache are enabled by default.
 - Security headers and a CSP that allows inline script and style by SHA-256 hash, taken from the page rendered at startup.
 - Downloads are verified against the SHA-256 checksum MaxMind publishes beside the archive.
+- Every refused or failed request is logged with the peer address, the method, the target and the reason. Successful ones stay out of the log, which the proxy records.
 - Tests for `cmd/echoip`, `maxmind`, `iputil/geo`, `http/request`, `http/security` and `http/server`.
 
 ### Changed
@@ -41,6 +42,8 @@ Changes since the fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/ec
 - Building needs Go 1.27.1, the version the image is built with, so a local check evaluates the standard library that ships.
 - CI runs `make lint test` and `make vulncheck` before building, and no longer pushes on a pull request.
 - The nginx configuration in the README was rewritten: HTTP/2, HSTS, timeouts, a rate limit on the lookup path and a default server answering 444.
+- `HEAD` reaches the handlers registered for `GET`, so monitoring that uses it on `/health` no longer sees a 404.
+- The MaxMind client refuses a redirect that changes the scheme of the first request. The license key is a query parameter, which a redirect carries to whoever answers.
 
 ### Fixed
 
