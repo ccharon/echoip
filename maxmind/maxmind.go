@@ -83,18 +83,23 @@ func (u *Updater) nextRefresh() time.Duration {
 	return u.retryDelay()
 }
 
-// Update downloads every configured database and replaces the file on disk.
-func (u *Updater) Update(ctx context.Context) error {
+// Update fetches every configured database and reports whether any of them
+// changed. A database that MaxMind has not rebuilt since the last check is
+// left alone.
+func (u *Updater) Update(ctx context.Context) (bool, error) {
+	changed := false
 	for _, edition := range slices.Sorted(maps.Keys(u.Databases)) {
-		if err := u.download(ctx, edition, u.Databases[edition]); err != nil {
-			return fmt.Errorf("downloading %s: %w", edition, err)
+		updated, err := u.download(ctx, edition, u.Databases[edition])
+		if err != nil {
+			return changed, fmt.Errorf("downloading %s: %w", edition, err)
 		}
+		changed = changed || updated
 	}
-	return nil
+	return changed, nil
 }
 
-// Run keeps the databases no older than Interval until ctx is done, and calls
-// onUpdate after each successful refresh. A failed refresh is retried after
+// Run checks the databases every Interval until ctx is done, and calls
+// onUpdate whenever a check brought new data. A failed check is retried after
 // retryInterval.
 func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 	if u.Interval <= 0 {
@@ -112,15 +117,21 @@ func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 		}
 
 		var next time.Duration
-		if err := u.Update(ctx); err != nil {
+		changed, err := u.Update(ctx)
+		switch {
+		case err != nil:
 			log.Printf("GeoIP update failed: %v", err)
 			next = u.retryDelay()
-		} else if err := onUpdate(); err != nil {
-			log.Printf("Reloading GeoIP databases failed: %v", err)
-			next = u.retryDelay()
-		} else {
-			log.Print("GeoIP databases updated")
+		case !changed:
 			next = u.nextRefresh()
+		default:
+			if err := onUpdate(); err != nil {
+				log.Printf("Reloading GeoIP databases failed: %v", err)
+				next = u.retryDelay()
+			} else {
+				log.Print("GeoIP databases updated")
+				next = u.nextRefresh()
+			}
 		}
 		timer.Reset(next)
 	}
@@ -131,7 +142,10 @@ func (u *Updater) retryDelay() time.Duration {
 	return min(u.Interval, retryInterval)
 }
 
-func (u *Updater) download(ctx context.Context, edition, path string) error {
+// download replaces the file at path and reports whether it changed. The
+// request is conditional, so MaxMind answers 304 with an empty body while the
+// edition has not been rebuilt.
+func (u *Updater) download(ctx context.Context, edition, path string) (bool, error) {
 	timeout := u.Timeout
 	if timeout == 0 {
 		timeout = defaultTimeout
@@ -147,20 +161,36 @@ func (u *Updater) download(ctx context.Context, edition, path string) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL+"?"+params.Encode(), nil)
 	if err != nil {
-		return err
+		return false, err
+	}
+
+	// The modification time of the file on disk is the last time this edition
+	// was confirmed current, which is what the condition compares against.
+	if fi, err := os.Stat(path); err == nil {
+		req.Header.Set("If-Modified-Since", fi.ModTime().UTC().Format(http.TimeFormat))
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return withoutURL(err)
+		return false, withoutURL(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %s", resp.Status)
+	switch resp.StatusCode {
+	case http.StatusNotModified:
+		return false, touch(path)
+	case http.StatusOK:
+		return true, extract(resp.Body, edition+".mmdb", path)
+	default:
+		return false, fmt.Errorf("unexpected status: %s", resp.Status)
 	}
+}
 
-	return extract(resp.Body, edition+".mmdb", path)
+// touch records that the file is current as of now, so the next refresh is due
+// a full interval later.
+func touch(path string) error {
+	now := time.Now()
+	return os.Chtimes(path, now, now)
 }
 
 // withoutURL strips the request URL from an error, because it carries the
