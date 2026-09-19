@@ -2,27 +2,38 @@ package http
 
 import "net/http"
 
+// AppError carries what a handler needs to render a failed request: the cause
+// for the log, the message for the client, and how to format it.
 type AppError struct {
-	Error       error
+	Err         error
 	Message     string
 	Code        int
 	ContentType string
 }
 
+func (e *AppError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return e.Message
+}
+
+func (e *AppError) Unwrap() error { return e.Err }
+
 func internalServerError(err error) *AppError {
 	return &AppError{
-		Error:   err,
+		Err:     err,
 		Message: "Internal server error",
 		Code:    http.StatusInternalServerError,
 	}
 }
 
 func notFound(err error) *AppError {
-	return &AppError{Error: err, Code: http.StatusNotFound}
+	return &AppError{Err: err, Code: http.StatusNotFound}
 }
 
 func badRequest(err error) *AppError {
-	return &AppError{Error: err, Code: http.StatusBadRequest}
+	return &AppError{Err: err, Code: http.StatusBadRequest}
 }
 
 func (e *AppError) AsJSON() *AppError {

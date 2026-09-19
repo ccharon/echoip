@@ -3,16 +3,16 @@ package http
 import (
 	"container/list"
 	"fmt"
-	"hash/fnv"
-	"log"
-	"net"
+	"net/netip"
 	"sync"
 )
 
+// Cache keeps the most recently built responses, keyed by address. A capacity
+// of zero disables it.
 type Cache struct {
-	capacity  int
 	mu        sync.RWMutex
-	entries   map[uint64]*list.Element
+	capacity  int
+	entries   map[netip.Addr]*list.Element
 	values    *list.List
 	evictions uint64
 }
@@ -29,76 +29,82 @@ func NewCache(capacity int) *Cache {
 	}
 	return &Cache{
 		capacity: capacity,
-		entries:  make(map[uint64]*list.Element),
+		entries:  make(map[netip.Addr]*list.Element),
 		values:   list.New(),
 	}
 }
 
-func key(ip net.IP) uint64 {
-	h := fnv.New64a()
+func (c *Cache) Set(addr netip.Addr, resp Response) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	if _, err := h.Write(ip); err != nil {
-		log.Printf("Write failed: %v", err)
-	}
-
-	return h.Sum64()
-}
-
-func (c *Cache) Set(ip net.IP, resp Response) {
 	if c.capacity == 0 {
 		return
 	}
-	k := key(ip)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	minEvictions := len(c.entries) - c.capacity + 1
-	if minEvictions > 0 { // At or above capacity. Shrink the cache
-		evicted := 0
-		for el := c.values.Front(); el != nil && evicted < minEvictions; {
-			value := el.Value.(Response)
-			delete(c.entries, key(value.IP))
-			next := el.Next()
-			c.values.Remove(el)
-			el = next
-			evicted++
-		}
-		c.evictions += uint64(evicted)
-	}
-	current, ok := c.entries[k]
-	if ok {
+
+	if current, ok := c.entries[addr]; ok {
 		c.values.Remove(current)
+		delete(c.entries, addr)
 	}
-	c.entries[k] = c.values.PushBack(resp)
+
+	c.evict(len(c.entries) - c.capacity + 1)
+	c.entries[addr] = c.values.PushBack(resp)
 }
 
-func (c *Cache) Get(ip net.IP) (Response, bool) {
-	k := key(ip)
+func (c *Cache) Get(addr netip.Addr) (Response, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	r, ok := c.entries[k]
+
+	el, ok := c.entries[addr]
 	if !ok {
 		return Response{}, false
 	}
-	return r.Value.(Response), true
+	return el.Value.(Response), true
 }
 
-func (c *Cache) Resize(capacity int) error {
-	if capacity < 0 {
-		return fmt.Errorf("invalid capacity: %d\n", capacity)
-	}
+// Clear removes every entry.
+func (c *Cache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	c.entries = make(map[netip.Addr]*list.Element)
+	c.values.Init()
+}
+
+// Resize changes the capacity, dropping the oldest entries that no longer fit.
+func (c *Cache) Resize(capacity int) error {
+	if capacity < 0 {
+		return fmt.Errorf("invalid capacity: %d", capacity)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.capacity = capacity
+	c.evict(len(c.entries) - capacity)
 	c.evictions = 0
+
 	return nil
 }
 
 func (c *Cache) Stats() CacheStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	return CacheStats{
 		Size:      len(c.entries),
 		Capacity:  c.capacity,
 		Evictions: c.evictions,
+	}
+}
+
+// evict drops the n oldest entries. The caller holds the write lock.
+func (c *Cache) evict(n int) {
+	for el := c.values.Front(); n > 0 && el != nil; n-- {
+		next := el.Next()
+		delete(c.entries, el.Value.(Response).IP)
+		c.values.Remove(el)
+		el = next
+		c.evictions++
 	}
 }

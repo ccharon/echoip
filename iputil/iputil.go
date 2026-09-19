@@ -1,43 +1,39 @@
 package iputil
 
 import (
-	"fmt"
+	"context"
 	"math/big"
 	"net"
+	"net/netip"
 	"strings"
 	"time"
 )
 
-func LookupAddr(ip net.IP) (string, error) {
-	names, err := net.LookupAddr(ip.String())
+// Bounds the reverse lookup, which runs while a request waits for its
+// response.
+const lookupAddrTimeout = 2 * time.Second
+
+// LookupAddr returns the hostname of addr, without the trailing dot of the
+// resolver answer.
+func LookupAddr(addr netip.Addr) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), lookupAddrTimeout)
+	defer cancel()
+
+	names, err := net.DefaultResolver.LookupAddr(ctx, addr.String())
 	if err != nil || len(names) == 0 {
 		return "", err
 	}
-	// Always return unrooted name
-	return strings.TrimRight(names[0], "."), nil
+	return strings.TrimSuffix(names[0], "."), nil
 }
 
-func LookupPort(ip net.IP, port uint64) error {
-	address := fmt.Sprintf("[%s]:%d", ip, port)
-
-	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
-	if err != nil {
-		return err
+// ToDecimal returns the address as a number, an IPv4 address from its 4 bytes
+// so that the value matches the usual decimal notation.
+func ToDecimal(addr netip.Addr) *big.Int {
+	i := new(big.Int)
+	if addr.Is4() {
+		b := addr.As4()
+		return i.SetBytes(b[:])
 	}
-
-	defer func(conn net.Conn) {
-		_ = conn.Close()
-	}(conn)
-
-	return nil
-}
-
-func ToDecimal(ip net.IP) *big.Int {
-	i := big.NewInt(0)
-	if to4 := ip.To4(); to4 != nil {
-		i.SetBytes(to4)
-	} else {
-		i.SetBytes(ip)
-	}
-	return i
+	b := addr.As16()
+	return i.SetBytes(b[:])
 }

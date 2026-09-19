@@ -4,10 +4,6 @@ OS := $(shell uname)
 ifeq ($(OS),Linux)
 	TAR_OPTS := --wildcards
 endif
-XGOARCH := amd64
-XGOOS := linux
-XBIN := $(XGOOS)_$(XGOARCH)/echoip
-
 all: lint test install
 
 test:
@@ -21,8 +17,11 @@ check-fmt:
 
 lint: check-fmt vet
 
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
 install:
-	go install ./...
+	go install -ldflags "-X main.version=$(VERSION)" ./...
 
 databases := GeoLite2-City GeoLite2-ASN
 
@@ -35,43 +34,28 @@ endif
 
 geoip-download: $(databases)
 
-# Create an environment to build multiarch containers (https://github.com/docker/buildx/)
-docker-multiarch-builder:
-	DOCKER_BUILDKIT=1 $(DOCKER) build -o . git://github.com/docker/buildx
-	mkdir -p ~/.docker/cli-plugins
-	mv buildx ~/.docker/cli-plugins/docker-buildx
-	$(DOCKER) buildx create --name multiarch-builder --node multiarch-builder --driver docker-container --use
-	$(DOCKER) run --rm --privileged multiarch/qemu-user-static --reset -p yes
+# The classic builder does not fill BUILDPLATFORM in, and an empty value is
+# rejected.
+BUILDPLATFORM ?= $(shell $(DOCKER) version -f '{{.Server.Os}}/{{.Server.Arch}}')
+
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 docker-build:
-	$(DOCKER) build -t $(DOCKER_IMAGE) .
+	$(DOCKER) build --build-arg BUILDPLATFORM=$(BUILDPLATFORM) --build-arg VERSION=$(VERSION) -t $(DOCKER_IMAGE) .
 
 docker-login:
 	$(DOCKER) login --username "$(DOCKER_USERNAME)" --password "$(DOCKER_PASSWORD)"
 
 docker-test:
-	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)))
+	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)))
 	$(eval DOCKER_PORT=$(shell $(DOCKER) port $(CONTAINER) | cut -d ":" -f 2))
 	curl -fsS -m 5 localhost:$(DOCKER_PORT) > /dev/null; $(DOCKER) stop $(CONTAINER)
 
 docker-push: docker-test docker-login
 	$(DOCKER) push $(DOCKER_IMAGE)
 
-docker-pushx: docker-multiarch-builder docker-test docker-login
-	$(DOCKER) buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t $(DOCKER_IMAGE) --push .
-
 docker-run:
-	$(DOCKER) run --volume ./data:/opt/echoip/data --publish 8080:8080 $(DOCKER_IMAGE)
-
-xinstall:
-	env GOOS=$(XGOOS) GOARCH=$(XGOARCH) go install ./...
-
-publish:
-ifndef DEST_PATH
-	$(error DEST_PATH must be set when publishing)
-endif
-	rsync -a $(GOPATH)/bin/$(XBIN) $(DEST_PATH)/$(XBIN)
-	@sha256sum $(GOPATH)/bin/$(XBIN)
+	$(DOCKER) run --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish 127.0.0.1:8080:8080 $(DOCKER_IMAGE)
 
 run:
-	go run cmd/echoip/main.go -a data/asn.mmdb -c data/city.mmdb -H x-forwarded-for -r -p
+	go run ./cmd/echoip -a data/GeoLite2-ASN.mmdb -c data/GeoLite2-City.mmdb -r -C 1000 -H X-Real-IP

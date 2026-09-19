@@ -11,12 +11,15 @@ type UserAgent struct {
 	RawValue string `json:"raw_value,omitempty"`
 }
 
+// Parse splits a User-Agent header into product, version and comment. It
+// covers the shapes CLI clients send, not the full grammar of the header.
 func Parse(s string) UserAgent {
 	parts := strings.SplitN(s, "/", 2)
 	var version, comment string
 	if len(parts) > 1 {
-		// If first character is a number, treat it as version
-		if len(parts[1]) > 0 && parts[1][0] >= 48 && parts[1][0] <= 57 {
+		// What follows the slash is the version when it starts with a digit,
+		// and a comment otherwise.
+		if len(parts[1]) > 0 && parts[1][0] >= '0' && parts[1][0] <= '9' {
 			rest := strings.SplitN(parts[1], " ", 2)
 			version = rest[0]
 			if len(rest) > 1 {

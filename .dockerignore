@@ -1,2 +1,7 @@
 Dockerfile
 Dockerfile.geoip
+.git
+.github
+.idea
+data
+maxmind-license.txt
