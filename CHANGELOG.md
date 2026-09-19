@@ -24,6 +24,10 @@
 
 - The request line on the page keeps `?ip=` when the page was opened for another address. It was built from the input field alone, which starts empty.
 
+### Documentation
+
+- The README follows the structure it documents: what it is, how to run it, how to configure it, known limitations. The nginx configuration moved to `doc/nginx.md`, the endpoints are a table, and the explanations of how the refresh and the address check work are gone from it.
+
 ## 2.0.0 - 2026-09-19
 
 Changes since the fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/echoip).
