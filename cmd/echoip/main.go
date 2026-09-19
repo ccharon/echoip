@@ -1,31 +1,90 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"log"
+	stdhttp "net/http"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
-	"github.com/mpolden/echoip/http"
-	"github.com/mpolden/echoip/iputil"
-	"github.com/mpolden/echoip/iputil/geo"
+	"github.com/ccharon/echoip/http"
+	"github.com/ccharon/echoip/iputil"
+	"github.com/ccharon/echoip/iputil/geo"
+	"github.com/ccharon/echoip/maxmind"
 )
+
+// licenseKeyEnv holds the MaxMind license key. It is read from the
+// environment rather than a flag, because flags are visible in the process
+// list.
+const licenseKeyEnv = "GEOIP_LICENSE_KEY"
+
+const defaultUpdateInterval = 336 * time.Hour
 
 type multiValueFlag []string
 
-func (f *multiValueFlag) String() string {
-	vs := ""
-	for i, v := range *f {
-		vs += v
-		if i < len(*f)-1 {
-			vs += ", "
-		}
-	}
-	return vs
-}
+func (f *multiValueFlag) String() string { return strings.Join(*f, ", ") }
 
 func (f *multiValueFlag) Set(v string) error {
 	*f = append(*f, v)
 	return nil
+}
+
+type options struct {
+	cityFile       string
+	asnFile        string
+	listen         string
+	templateDir    string
+	headers        multiValueFlag
+	cacheSize      int
+	updateInterval time.Duration
+	reverseLookup  bool
+	portLookup     bool
+	profile        bool
+}
+
+func parseFlags(args []string) (*options, error) {
+	var opts options
+
+	fs := flag.NewFlagSet("echoip", flag.ContinueOnError)
+	fs.StringVar(&opts.cityFile, "c", "", "Path to GeoIP city database")
+	fs.StringVar(&opts.asnFile, "a", "", "Path to GeoIP ASN database")
+	fs.StringVar(&opts.listen, "l", ":8080", "Listening address")
+	fs.BoolVar(&opts.reverseLookup, "r", false, "Perform reverse hostname lookups")
+	fs.BoolVar(&opts.portLookup, "p", false, "Enable port lookup")
+	fs.StringVar(&opts.templateDir, "t", "html", "Path to template dir")
+	fs.IntVar(&opts.cacheSize, "C", 0, "Size of response cache. Set to 0 to disable")
+	fs.BoolVar(&opts.profile, "P", false, "Enables profiling handlers")
+	fs.DurationVar(&opts.updateInterval, "u", defaultUpdateInterval,
+		"Interval for refreshing GeoIP databases from MaxMind. Requires "+licenseKeyEnv+". Set to 0 to disable")
+	fs.Var(&opts.headers, "H", "Header to trust for remote IP, if present (e.g. X-Real-IP)")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return nil, errors.New("unexpected arguments")
+	}
+
+	return &opts, nil
+}
+
+// editions maps the GeoLite2 editions the updater downloads to the files the
+// server reads.
+func editions(cityFile, asnFile string) map[string]string {
+	e := make(map[string]string)
+	if cityFile != "" {
+		e[maxmind.EditionCity] = cityFile
+	}
+	if asnFile != "" {
+		e[maxmind.EditionASN] = asnFile
+	}
+	return e
 }
 
 func init() {
@@ -34,64 +93,98 @@ func init() {
 }
 
 func main() {
-	cityFile := flag.String("c", "", "Path to GeoIP city database")
-	asnFile := flag.String("a", "", "Path to GeoIP ASN database")
-	listen := flag.String("l", ":8080", "Listening address")
-	reverseLookup := flag.Bool("r", false, "Perform reverse hostname lookups")
-	portLookup := flag.Bool("p", false, "Enable port lookup")
-	template := flag.String("t", "html", "Path to template dir")
-	cacheSize := flag.Int("C", 0, "Size of response cache. Set to 0 to disable")
-	profile := flag.Bool("P", false, "Enables profiling handlers")
-
-	var headers multiValueFlag
-	flag.Var(&headers, "H", "Header to trust for remote IP, if present (e.g. X-Real-IP)")
-
-	flag.Parse()
-	if len(flag.Args()) != 0 {
-		flag.Usage()
-		return
-	}
-
-	r, err := geo.Open(*cityFile, *asnFile)
+	opts, err := parseFlags(os.Args[1:])
 	if err != nil {
-		log.Fatal(err)
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		os.Exit(2)
 	}
 
-	cache := http.NewCache(*cacheSize)
-	server := http.New(r, cache, *profile)
-	server.IPHeaders = headers
+	updater := &maxmind.Updater{
+		LicenseKey: os.Getenv(licenseKeyEnv),
+		Interval:   opts.updateInterval,
+		Databases:  editions(opts.cityFile, opts.asnFile),
+	}
+	if len(updater.Databases) > 0 && updater.LicenseKey == "" {
+		log.Fatalf("%s must be set to download the GeoIP databases", licenseKeyEnv)
+	}
 
-	if _, err := os.Stat(*template); err == nil {
-		server.Template = *template
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if updater.Enabled() && updater.Stale() {
+		log.Print("Downloading GeoIP databases")
+		if err := updater.Update(ctx); err != nil {
+			log.Print(err)
+		}
+	}
+
+	// A database that is missing or broken only disables the lookups that need
+	// it. The server keeps serving and picks the database up once a refresh
+	// succeeds.
+	geoReader, err := geo.Open(opts.cityFile, opts.asnFile)
+	if err != nil {
+		log.Printf("GeoIP lookups are limited: %v", err)
+	}
+
+	cache := http.NewCache(opts.cacheSize)
+	server := http.New(serverConfig(opts), geoReader, cache)
+
+	if updater.Enabled() {
+		log.Printf("Refreshing GeoIP databases every %s", updater.Interval)
+		go updater.Run(ctx, func() error {
+			if err := geoReader.Reload(); err != nil {
+				return err
+			}
+			// Cached responses were built from the previous databases.
+			cache.Clear()
+			return nil
+		})
+	}
+
+	log.Printf("Listening on http://%s", opts.listen)
+	if err := server.ListenAndServe(ctx, opts.listen); err != nil && !errors.Is(err, stdhttp.ErrServerClosed) {
+		log.Fatal(err)
+	}
+	log.Print("Shutdown complete")
+}
+
+// serverConfig turns the flags into the server configuration and reports what
+// it enabled.
+func serverConfig(opts *options) http.Config {
+	cfg := http.Config{
+		IPHeaders: opts.headers,
+		Profile:   opts.profile,
+	}
+
+	if _, err := os.Stat(opts.templateDir); err == nil {
+		cfg.TemplateDir = opts.templateDir
 	} else {
-		log.Printf("Not configuring default handler: Template not found: %s", *template)
+		log.Printf("Not configuring default handler: Template not found: %s", opts.templateDir)
 	}
 
-	if *reverseLookup {
-		log.Println("Enabling reverse lookup")
-		server.LookupAddr = iputil.LookupAddr
+	if opts.reverseLookup {
+		log.Print("Enabling reverse lookup")
+		cfg.LookupAddr = iputil.LookupAddr
 	}
 
-	if *portLookup {
-		log.Println("Enabling port lookup")
-		server.LookupPort = iputil.LookupPort
+	if opts.portLookup {
+		log.Print("Enabling port lookup")
+		cfg.LookupPort = iputil.LookupPort
 	}
 
-	if len(headers) > 0 {
-		log.Printf("Trusting remote IP from header(s): %s", headers.String())
+	if len(opts.headers) > 0 {
+		log.Printf("Trusting remote IP from header(s): %s", opts.headers.String())
 	}
 
-	if *cacheSize > 0 {
-		log.Printf("Cache capacity set to %d", *cacheSize)
+	if opts.cacheSize > 0 {
+		log.Printf("Cache capacity set to %d", opts.cacheSize)
 	}
 
-	if *profile {
-		log.Printf("Enabling profiling handlers")
+	if opts.profile {
+		log.Print("Enabling profiling handlers")
 	}
 
-	log.Printf("Listening on http://%s", *listen)
-
-	if err := server.ListenAndServe(*listen); err != nil {
-		log.Fatal(err)
-	}
+	return cfg
 }
