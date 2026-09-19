@@ -44,7 +44,7 @@ func formatCoordinate(c float64) string {
 // newResponse answers from the cache when the address is known. The user agent
 // belongs to the request, not to the address, so it is never cached.
 func (s *Server) newResponse(r *http.Request) (Response, error) {
-	addr, err := ipFromRequest(s.cfg.IPHeaders, r, true)
+	addr, err := s.ipFromRequest(r, true)
 	if err != nil {
 		return Response{}, err
 	}

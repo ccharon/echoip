@@ -21,7 +21,7 @@ vulncheck:
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 install:
-	go install ./...
+	go install -ldflags "-X main.version=$(VERSION)" ./...
 
 databases := GeoLite2-City GeoLite2-ASN
 
@@ -38,8 +38,10 @@ geoip-download: $(databases)
 # rejected.
 BUILDPLATFORM ?= $(shell $(DOCKER) version -f '{{.Server.Os}}/{{.Server.Arch}}')
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
 docker-build:
-	$(DOCKER) build --build-arg BUILDPLATFORM=$(BUILDPLATFORM) -t $(DOCKER_IMAGE) .
+	$(DOCKER) build --build-arg BUILDPLATFORM=$(BUILDPLATFORM) --build-arg VERSION=$(VERSION) -t $(DOCKER_IMAGE) .
 
 docker-login:
 	$(DOCKER) login --username "$(DOCKER_USERNAME)" --password "$(DOCKER_PASSWORD)"

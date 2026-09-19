@@ -38,7 +38,8 @@ func TestIPFromRequest(t *testing.T) {
 			URL:        u,
 		}
 		r.Header.Add(tt.headerKey, tt.headerValue)
-		addr, err := ipFromRequest(tt.trustedHeaders, r, true)
+		server := &Server{cfg: Config{IPHeaders: tt.trustedHeaders}}
+		addr, err := server.ipFromRequest(r, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,6 +99,46 @@ func TestAcceptsMediaType(t *testing.T) {
 		r := &http.Request{Header: http.Header{"Accept": []string{tt.header}}}
 		if got := acceptsMediaType(r, "application/json"); got != tt.out {
 			t.Errorf("Expected %t, got %t for %q", tt.out, got, tt.header)
+		}
+	}
+}
+
+func TestTrustedProxies(t *testing.T) {
+	tests := []struct {
+		peer    string
+		trusted []string
+		out     string
+	}{
+		// Without a list every peer is believed.
+		{"203.0.113.9:1234", nil, "1.3.3.7"},
+		{"10.0.0.2:1234", []string{"10.0.0.0/8"}, "1.3.3.7"},
+		{"10.0.0.2:1234", []string{"10.0.0.2/32"}, "1.3.3.7"},
+		{"127.0.0.1:1234", []string{"127.0.0.1/32", "10.0.0.0/8"}, "1.3.3.7"},
+		// A peer outside the list keeps its own address.
+		{"203.0.113.9:1234", []string{"10.0.0.0/8"}, "203.0.113.9"},
+		{"10.1.0.2:1234", []string{"10.0.0.2/32"}, "10.1.0.2"},
+		{"[2001:db8::1]:1234", []string{"2001:db8::/32"}, "1.3.3.7"},
+		{"[2001:db8::1]:1234", []string{"10.0.0.0/8"}, "2001:db8::1"},
+	}
+
+	for _, tt := range tests {
+		var trusted []netip.Prefix
+		for _, p := range tt.trusted {
+			trusted = append(trusted, netip.MustParsePrefix(p))
+		}
+
+		server := &Server{cfg: Config{IPHeaders: []string{"X-Real-IP"}, TrustedProxies: trusted}}
+		r := &http.Request{
+			RemoteAddr: tt.peer,
+			Header:     http.Header{"X-Real-Ip": []string{"1.3.3.7"}},
+		}
+
+		addr, err := server.ipFromRequest(r, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := netip.MustParseAddr(tt.out); addr != want {
+			t.Errorf("peer %s with %v: expected %s, got %s", tt.peer, tt.trusted, want, addr)
 		}
 	}
 }

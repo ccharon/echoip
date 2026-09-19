@@ -78,9 +78,11 @@ networks:
 | `-l` | string | `:8080` | Listening address |
 | `-t` | string | `html` | Path to the template directory |
 | `-H` | string | unset | Header to trust for the remote IP, e.g. `X-Real-IP`. May be repeated. |
+| `-T` | string | unset | Network allowed to set the headers from `-H`, e.g. `10.0.0.0/8` or a single address. May be repeated. Unset trusts every peer. |
 | `-r` | bool | `false` | Perform reverse hostname lookups |
 | `-C` | int | `0` | Size of the response cache. `0` disables caching. |
 | `-P` | bool | `false` | Enable profiling handlers |
+| `-version` | bool | `false` | Print the version and exit |
 
 The license key is read from the environment rather than a flag, because flags
 are visible in the process list.
@@ -131,6 +133,11 @@ The trusted headers from `-H` decide which address the service reports. Set
 them only for headers the proxy in front of the service overwrites, otherwise a
 caller can choose the address they are shown data for. That address is only
 looked up, never contacted.
+
+`-T` narrows that to the networks the proxy connects from. A request that
+arrives from anywhere else is answered for its own address, whatever headers it
+carries. With the service bound to localhost, `-T 127.0.0.1` covers a proxy on
+the same host.
 
 `make vulncheck` runs govulncheck, which CI runs before it builds the image. It
 fails the build when a known vulnerability is reachable from this code. One
