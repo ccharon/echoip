@@ -341,12 +341,13 @@ $ curl -L -H 'Accept: application/json' echoip.yoursite.com  # or curl -L echoip
 ## Release
 
 ```bash
-git tag -a v1.0.0 -m "v1.0.0"
-git push origin v1.0.0
+git tag -a v2.0.1 -m "v2.0.1"
+git push origin v2.0.1
 ```
 
-CI builds the image again for the tag and publishes it as `1.0.0`, `1.0` and
-`sha-<commit>`. A push to `master` publishes `latest`.
+CI builds the image again for the tag and publishes it as `2.0.1`, `2.0` and
+`sha-<commit>`. A push to `master` publishes `latest`. Tag the commit on
+`master`, because that is what the image is built from.
 
 ## Development
 
