@@ -44,18 +44,21 @@ func (r *Router) Handler() http.Handler {
 				return route.handler(w, req)
 			}
 		}
-		return NotFoundHandler(w, req)
+		return notFoundHandler(w, req)
 	})
 }
 
-func (r *Route) Header(header, value string) {
-	r.MatcherFunc(func(req *http.Request) bool {
+// Header limits the route to requests that carry this exact header value.
+func (r *Route) Header(header, value string) *Route {
+	return r.MatcherFunc(func(req *http.Request) bool {
 		return req.Header.Get(header) == value
 	})
 }
 
-func (r *Route) MatcherFunc(f func(*http.Request) bool) {
+// MatcherFunc limits the route to requests that f accepts.
+func (r *Route) MatcherFunc(f func(*http.Request) bool) *Route {
 	r.matcherFunc = f
+	return r
 }
 
 func (r *Route) match(req *http.Request) bool {

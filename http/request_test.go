@@ -1,0 +1,78 @@
+package http
+
+import (
+	"net"
+	"net/http"
+	"net/url"
+	"testing"
+)
+
+func TestIPFromRequest(t *testing.T) {
+	tests := []struct {
+		remoteAddr     string
+		headerKey      string
+		headerValue    string
+		trustedHeaders []string
+		out            string
+	}{
+		{"127.0.0.1:9999", "", "", nil, "127.0.0.1"},                                                                // No header given
+		{"127.0.0.1:9999", "X-Real-IP", "1.3.3.7", nil, "127.0.0.1"},                                                // Trusted header is empty
+		{"127.0.0.1:9999", "X-Real-IP", "1.3.3.7", []string{"X-Foo-Bar"}, "127.0.0.1"},                              // Trusted header does not match
+		{"127.0.0.1:9999", "X-Real-IP", "1.3.3.7", []string{"X-Real-IP", "X-Forwarded-For"}, "1.3.3.7"},             // Trusted header matches
+		{"127.0.0.1:9999", "X-Forwarded-For", "1.3.3.7", []string{"X-Real-IP", "X-Forwarded-For"}, "1.3.3.7"},       // Second trusted header matches
+		{"127.0.0.1:9999", "X-Forwarded-For", "1.3.3.7,4.2.4.2", []string{"X-Forwarded-For"}, "1.3.3.7"},            // X-Forwarded-For with multiple entries (commas separator)
+		{"127.0.0.1:9999", "X-Forwarded-For", "1.3.3.7, 4.2.4.2", []string{"X-Forwarded-For"}, "1.3.3.7"},           // X-Forwarded-For with multiple entries (space+comma separator)
+		{"127.0.0.1:9999", "X-Forwarded-For", "", []string{"X-Forwarded-For"}, "127.0.0.1"},                         // Empty header
+		{"127.0.0.1:9999?ip=1.2.3.4", "", "", nil, "1.2.3.4"},                                                       // passed in "ip" parameter
+		{"127.0.0.1:9999?ip=1.2.3.4", "X-Forwarded-For", "1.3.3.7,4.2.4.2", []string{"X-Forwarded-For"}, "1.2.3.4"}, // ip parameter wins over X-Forwarded-For with multiple entries
+	}
+	for _, tt := range tests {
+		u, err := url.Parse("http://" + tt.remoteAddr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &http.Request{
+			RemoteAddr: u.Host,
+			Header:     http.Header{},
+			URL:        u,
+		}
+		r.Header.Add(tt.headerKey, tt.headerValue)
+		ip, err := ipFromRequest(tt.trustedHeaders, r, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := net.ParseIP(tt.out)
+		if !ip.Equal(out) {
+			t.Errorf("Expected %s, got %s", out, ip)
+		}
+	}
+}
+
+func TestCLIMatcher(t *testing.T) {
+	browserUserAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_4) " +
+		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.28 " +
+		"Safari/537.36"
+	tests := []struct {
+		in  string
+		out bool
+	}{
+		{"curl/7.26.0", true},
+		{"Wget/1.13.4 (linux-gnu)", true},
+		{"Wget", true},
+		{"fetch libfetch/2.0", true},
+		{"HTTPie/0.9.3", true},
+		{"httpie-go/0.6.0", true},
+		{"Go 1.1 package http", true},
+		{"Go-http-client/1.1", true},
+		{"Go-http-client/2.0", true},
+		{"ddclient/3.8.3", true},
+		{"Mikrotik/6.x Fetch", true},
+		{browserUserAgent, false},
+	}
+	for _, tt := range tests {
+		r := &http.Request{Header: http.Header{"User-Agent": []string{tt.in}}}
+		if got := cliMatcher(r); got != tt.out {
+			t.Errorf("Expected %t, got %t for %q", tt.out, got, tt.in)
+		}
+	}
+}
