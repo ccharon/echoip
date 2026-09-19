@@ -1,11 +1,20 @@
 # Build
-FROM golang:1.27.1-bookworm AS build
+# BUILDPLATFORM and TARGET* are filled in by BuildKit. The Makefile passes the
+# build platform for the classic builder, which leaves the target empty and so
+# builds for the machine it runs on.
+ARG BUILDPLATFORM
+FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm AS build
 WORKDIR /go/src/github.com/ccharon/echoip
 COPY . .
 
+# Built on the native builder and cross compiled for the target, so no
+# emulation is involved. Tests run in CI, which is where a binary can be
+# executed on the machine that built it.
+ARG TARGETOS TARGETARCH
+
 # Must build without cgo because libc is unavailable in runtime image
 ENV CGO_ENABLED=0
-RUN make
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/echoip ./cmd/echoip
 
 # The runtime image has no shell to create the data directory, and the
 # unprivileged user needs to own it.
@@ -17,7 +26,7 @@ EXPOSE 8080
 
 # Needed to reach the MaxMind download endpoint over TLS
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /go/bin/echoip /opt/echoip/
+COPY --from=build /out/echoip /opt/echoip/
 COPY html /opt/echoip/html
 COPY --from=build --chown=65532:65532 /data /opt/echoip/data
 
