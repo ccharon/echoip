@@ -121,7 +121,9 @@ func editions(cityFile, asnFile string) map[string]string {
 
 func init() {
 	log.SetPrefix("echoip: ")
-	log.SetFlags(log.Lshortfile)
+	// The request log is an audit trail, so every line needs its own time. A
+	// supervisor that stamps as well leaves the two side by side.
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
 func main() {

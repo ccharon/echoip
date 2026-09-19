@@ -148,7 +148,7 @@ Successful requests are not logged, because the proxy in front already records
 them. Refused and failed ones are, in one line each:
 
 ```
-echoip: 203.0.113.9:54321 GET "/ip?ip=10.0.0.5" -> 400: not a public IP: 10.0.0.5
+echoip: 2026/09/19 22:25:19 handler.go:46: 203.0.113.9:54321 GET "/ip?ip=10.0.0.5" -> 400: not a public IP: 10.0.0.5
 ```
 
 The address is the one the connection came from, not the one a header claims.
