@@ -7,8 +7,9 @@ import (
 	"sync"
 )
 
-// Cache keeps the most recently built responses, keyed by address. A capacity
-// of zero disables it.
+// Cache keeps responses by address. A capacity of zero disables it. When it is
+// full the entry that was inserted first is dropped, because reading an entry
+// does not move it.
 type Cache struct {
 	mu        sync.RWMutex
 	capacity  int
@@ -72,6 +73,7 @@ func (c *Cache) Clear() {
 }
 
 // Resize changes the capacity, dropping the oldest entries that no longer fit.
+// The eviction counter starts over, so it measures the new capacity.
 func (c *Cache) Resize(capacity int) error {
 	if capacity < 0 {
 		return fmt.Errorf("invalid capacity: %d", capacity)
