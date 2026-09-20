@@ -152,10 +152,11 @@ func main() {
 		Databases:  editions(opts.cityFile, opts.asnFile),
 	}
 	if len(updater.Databases) > 0 {
-		for env, value := range map[string]string{accountIDEnv: updater.AccountID, licenseKeyEnv: updater.LicenseKey} {
-			if value == "" {
-				log.Fatalf("%s must be set to download the GeoIP databases", env)
-			}
+		if updater.AccountID == "" {
+			log.Fatalf("%s must be set to download the GeoIP databases", accountIDEnv)
+		}
+		if updater.LicenseKey == "" {
+			log.Fatalf("%s must be set to download the GeoIP databases", licenseKeyEnv)
 		}
 	}
 

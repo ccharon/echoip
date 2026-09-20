@@ -56,10 +56,10 @@ func acceptsMediaType(r *http.Request, mediaType string) bool {
 // ipFromRequest returns the address to report, unmapped so that an IPv4
 // address has one representation. Only the first entry of X-Forwarded-For is
 // trusted, because a client may append to that header.
-func (s *Server) ipFromRequest(r *http.Request, customIP bool) (netip.Addr, error) {
+func (s *Server) ipFromRequest(r *http.Request) (netip.Addr, error) {
 	peer, peerErr := peerAddr(r)
 
-	if customIP && r.URL != nil {
+	if r.URL != nil {
 		if v := r.URL.Query().Get("ip"); v != "" {
 			return suppliedAddr(v)
 		}
