@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -185,9 +186,14 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		JSON:         string(jsonData),
 	}
 
-	if err := pageTemplate.ExecuteTemplate(w, indexTemplate, &data); err != nil {
+	// Rendered into a buffer first, because a failure halfway through would
+	// otherwise leave a truncated page that no status code can take back.
+	var page bytes.Buffer
+	if err := pageTemplate.ExecuteTemplate(&page, indexTemplate, &data); err != nil {
 		return internalServerError(err)
 	}
+	writeRaw(w, page.String())
+
 	return nil
 }
 

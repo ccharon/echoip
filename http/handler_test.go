@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -247,6 +248,45 @@ func TestCacheResizeBoundsTheBody(t *testing.T) {
 	}
 	if strings.Count(got, "9") > maxResizeBody {
 		t.Errorf("the answer repeats the body: %q", got)
+	}
+}
+
+// failingDB stands in for a database file that opened and then went bad.
+type failingDB struct{ testDb }
+
+func (*failingDB) City(netip.Addr) (geo.City, error) {
+	return geo.City{}, errors.New("city database is unreadable")
+}
+
+func (*failingDB) ASN(netip.Addr) (geo.ASN, error) {
+	return geo.ASN{}, errors.New("asn database is unreadable")
+}
+
+// A lookup that fails has to leave a trace, because an address the database
+// does not hold returns no error at all.
+func TestFailedLookupIsLogged(t *testing.T) {
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(io.Discard)
+
+	server := New(Config{}, &failingDB{}, NewCache(0))
+	s := httptest.NewServer(server.Handler())
+
+	out, status, err := httpGet(s.URL+"/json", "", "curl/7.43.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 200 {
+		t.Errorf("expected the response without geo data, got %d", status)
+	}
+	if !strings.Contains(out, `"ip": "127.0.0.1"`) {
+		t.Errorf("expected the address in %q", out)
+	}
+
+	for _, want := range []string{"City lookup failed", "ASN lookup failed", "127.0.0.1"} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("expected %q in the log %q", want, logged.String())
+		}
 	}
 }
 

@@ -17,6 +17,8 @@
 
 ### Fixed
 
+- A failed GeoIP lookup is logged. An address the database does not hold returns no error, so a failure meant the file was unreadable, and the service answered without geo data and without a trace.
+- The browser page is rendered into a buffer before it is written. A template failure halfway through left a truncated page that the 500 could no longer take back.
 - `country_eu` follows the country of the address alone. The registered country says where the block is registered, not where it is used, so a block registered in the EU and used elsewhere reported `true`.
 
 ## 2.0.1 - 2026-09-20

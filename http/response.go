@@ -2,6 +2,7 @@ package http
 
 import (
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"net/netip"
@@ -64,8 +65,16 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 // that fails leaves its fields empty, which is what a missing database gives
 // as well.
 func (s *Server) lookup(addr netip.Addr) Response {
-	city, _ := s.geo.City(addr)
-	asn, _ := s.geo.ASN(addr)
+	// An address the database does not hold is no error, so a failure here
+	// means the file itself is unreadable and the operator wants to know.
+	city, err := s.geo.City(addr)
+	if err != nil {
+		log.Printf("City lookup failed for %s: %v", addr, err)
+	}
+	asn, err := s.geo.ASN(addr)
+	if err != nil {
+		log.Printf("ASN lookup failed for %s: %v", addr, err)
+	}
 
 	var hostname string
 	if s.cfg.LookupAddr != nil {
