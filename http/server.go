@@ -42,6 +42,11 @@ const (
 	shutdownTimeout = 10 * time.Second
 )
 
+// maxHeaderBytes caps the request line and the headers. The default is a
+// megabyte per connection, and nothing this service answers needs more than a
+// browser sends.
+const maxHeaderBytes = 8 << 10
+
 // Config holds the options that stay fixed while the server runs.
 type Config struct {
 	// IPHeaders are trusted for the remote address, in the order given.
@@ -121,6 +126,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
+		MaxHeaderBytes:    maxHeaderBytes,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

@@ -23,8 +23,11 @@ func TestParseFlagsDefaults(t *testing.T) {
 	if opts.listen != ":8080" {
 		t.Errorf("listen = %q, want %q", opts.listen, ":8080")
 	}
-	if opts.updateInterval != 24*time.Hour {
-		t.Errorf("updateInterval = %s, want %s", opts.updateInterval, 24*time.Hour)
+	if opts.updateHours != 24 {
+		t.Errorf("updateHours = %d, want 24", opts.updateHours)
+	}
+	if got := opts.updateInterval(); got != 24*time.Hour {
+		t.Errorf("updateInterval() = %s, want %s", got, 24*time.Hour)
 	}
 	if opts.cacheSize != 0 || opts.reverseLookup || opts.profile || opts.showVersion {
 		t.Errorf("expected the remaining options to be off: %+v", opts)
@@ -37,7 +40,7 @@ func TestParseFlagsDefaults(t *testing.T) {
 func TestParseFlags(t *testing.T) {
 	opts, err := parseFlags([]string{
 		"-c", "city.mmdb", "-a", "asn.mmdb", "-l", "127.0.0.1:9000",
-		"-u", "6h", "-C", "500", "-r", "-P",
+		"-u", "6", "-C", "500", "-r", "-P",
 		"-H", "X-Real-IP", "-H", "X-Forwarded-For",
 		"-T", "10.0.0.0/8", "-T", "192.168.1.1",
 	}, io.Discard)
@@ -55,7 +58,7 @@ func TestParseFlags(t *testing.T) {
 	if !slices.Equal(opts.trustedProxies, want) {
 		t.Errorf("trustedProxies = %v, want %v", opts.trustedProxies, want)
 	}
-	if opts.updateInterval != 6*time.Hour || opts.cacheSize != 500 {
+	if opts.updateInterval() != 6*time.Hour || opts.cacheSize != 500 {
 		t.Errorf("unexpected options: %+v", opts)
 	}
 	if !opts.reverseLookup || !opts.profile {
@@ -68,6 +71,8 @@ func TestParseFlagsErrors(t *testing.T) {
 		{"-T", "not-an-address"},
 		{"-T", "10.0.0.0/64"},
 		{"-u", "forever"},
+		{"-u", "24h"},
+		{"-u", "-1"},
 		{"-nosuchflag"},
 		{"leftover-argument"},
 	}
@@ -190,5 +195,31 @@ func TestPrefixList(t *testing.T) {
 	}
 	if got := prefixList(nil); got != "" {
 		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestMissingCredential(t *testing.T) {
+	databases := map[string]string{maxmind.EditionASN: "asn.mmdb"}
+
+	tests := []struct {
+		name string
+		u    maxmind.Updater
+		want string
+	}{
+		{"complete", maxmind.Updater{AccountID: "1", LicenseKey: "k", Interval: time.Hour, Databases: databases}, ""},
+		{"no account", maxmind.Updater{LicenseKey: "k", Interval: time.Hour, Databases: databases}, accountIDEnv},
+		{"no key", maxmind.Updater{AccountID: "1", Interval: time.Hour, Databases: databases}, licenseKeyEnv},
+		{"account is reported first", maxmind.Updater{Interval: time.Hour, Databases: databases}, accountIDEnv},
+		// Without an interval nothing is downloaded, so nothing is needed.
+		{"checking disabled", maxmind.Updater{Databases: databases}, ""},
+		{"no databases", maxmind.Updater{Interval: time.Hour}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := missingCredential(&tt.u); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
