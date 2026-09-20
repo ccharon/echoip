@@ -7,9 +7,10 @@ import (
 	"sync"
 )
 
-// Cache keeps responses by address. A capacity of zero disables it. When it is
-// full the entry that was inserted first is dropped, because reading an entry
-// does not move it.
+// Cache keeps responses by address, which saves the reverse lookup that the
+// response needs. A capacity of zero disables it. When it is full the entry
+// that was inserted first is dropped, because reading an entry does not move
+// it.
 type Cache struct {
 	mu        sync.RWMutex
 	capacity  int
