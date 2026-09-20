@@ -76,7 +76,7 @@ networks:
 
 The service speaks plain HTTP and belongs behind a proxy that terminates TLS,
 sets the trusted header and limits the request rate. A working configuration is
-in [doc/nginx.md](https://raw.githubusercontent.com/ccharon/echoip/master/doc/nginx.md).
+in [doc/nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/master/doc/nginx.conf).
 
 ## Endpoints
 
@@ -205,7 +205,7 @@ CI builds the image for the tag and publishes it as `2.0.2`, `2.0` and
 
 ## License
 
-BSD 3-Clause, see [LICENSE](LICENSE). Copyright is held by Martin Polden for the
+BSD 3-Clause, see [LICENSE](https://raw.githubusercontent.com/ccharon/echoip/master/LICENSE). Copyright is held by Martin Polden for the
 original work and by Christian Charon for the changes in this fork.
 
 This product includes GeoLite2 data created by MaxMind, available from

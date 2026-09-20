@@ -15,6 +15,10 @@
 - The response cache evicts the entry that was read longest ago instead of the one inserted first. A client that keeps asking stays cached however many one-time visitors pass through. A read takes the write lock now, which costs a map lookup and a pointer swap.
 - The MaxMind credentials are required only when a database is configured and `-u` is not `0`. A server that is handed its database files and never checks for new ones asks for neither.
 
+### Documentation
+
+- The nginx example is a configuration file rather than a fenced block in a Markdown page, so the link serves something a reader can save and nginx can read. Its prose moved into the comments it belongs to.
+
 ### Fixed
 
 - `/coordinates` answers with nothing when the address has no location. It formatted the zero value as `0.000000,0.000000`, a place in the Gulf of Guinea.
