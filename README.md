@@ -119,7 +119,7 @@ $ curl echoip.example.com/json
 | `GEOIP_LICENSE_KEY` | environment | none | MaxMind license key. Required alongside the account ID. |
 | `-a` | string | none | Path to the GeoIP ASN database |
 | `-c` | string | none | Path to the GeoIP city database |
-| `-u` | duration | `24h` | Interval for checking MaxMind for new databases, e.g. `24h` or `90m`. Units are `ns` to `h`, there is no day. `0` disables checking, and then no credentials are needed. |
+| `-u` | int | `24` | Hours between checks for new databases. `0` disables checking, and then no credentials are needed. |
 | `-l` | string | `:8080` | Listening address. An empty host listens on all interfaces, IPv4 and IPv6. `0.0.0.0:8080` is IPv4 only, `127.0.0.1:8080` is loopback only. |
 | `-H` | string, repeatable | none | Header to trust for the remote IP, e.g. `X-Real-IP` |
 | `-T` | string, repeatable | any peer | Networks whose requests may set the headers from `-H`, e.g. `10.0.0.0/8` or a single address |
@@ -133,6 +133,10 @@ and `-H X-Real-IP` in its `ENTRYPOINT`, so the table describes the binary.
 `-c` and `-a` also tell the updater where to write. The credentials are read
 from the environment rather than from flags, because flags are visible in the
 process list. They are sent as HTTP basic auth, so no URL carries them.
+
+`-u` counts whole hours. MaxMind rebuilds GeoLite2 twice a week and limits
+downloads per day, so a finer interval buys nothing and a coarser one such as
+`48` costs little.
 
 `-u 0` leaves the database files to whoever put them there, which is what
 `make geoip-download` or a volume filled from outside does. The browser page is built into the binary, so there is nothing to
