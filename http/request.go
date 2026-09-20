@@ -104,9 +104,8 @@ func peerAddr(r *http.Request) (netip.Addr, error) {
 }
 
 // suppliedAddr reads an address the caller chose, from ?ip= or from a trusted
-// header. Only a public address is accepted, so a caller cannot aim a lookup
-// at the network the service runs in. The peer address stays unchecked, which
-// keeps the service usable on a local network.
+// header. Only a public address is accepted, so a caller cannot aim a lookup at
+// the network the service runs in. The peer address is exempt, see ipFromRequest.
 func suppliedAddr(v string) (netip.Addr, error) {
 	addr, err := parseAddr(v)
 	if err != nil {
