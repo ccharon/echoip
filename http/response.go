@@ -41,19 +41,30 @@ func formatCoordinate(c float64) string {
 	return strconv.FormatFloat(c, 'f', 6, 64)
 }
 
-// newResponse answers from the cache when the address is known. The user agent
-// belongs to the request, not to the address, so it is never cached.
+// newResponse answers from the cache when the address is known.
 func (s *Server) newResponse(r *http.Request) (Response, error) {
-	addr, err := s.ipFromRequest(r, true)
+	addr, err := s.ipFromRequest(r)
 	if err != nil {
 		return Response{}, err
 	}
 
-	if response, ok := s.cache.Get(addr); ok {
-		response.UserAgent = userAgentFromRequest(r)
-		return response, nil
+	response, cached := s.cache.Get(addr)
+	if !cached {
+		response = s.lookup(addr)
+		s.cache.Set(addr, response)
 	}
 
+	// The user agent belongs to the request, not to the address, so it is
+	// never cached.
+	response.UserAgent = userAgentFromRequest(r)
+
+	return response, nil
+}
+
+// lookup gathers what the databases and the resolver know about addr. A lookup
+// that fails leaves its fields empty, which is what a missing database gives
+// as well.
+func (s *Server) lookup(addr netip.Addr) Response {
 	city, _ := s.geo.City(addr)
 	asn, _ := s.geo.ASN(addr)
 
@@ -67,7 +78,7 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 		asnumber = fmt.Sprintf("AS%d", asn.AutonomousSystemNumber)
 	}
 
-	response := Response{
+	return Response{
 		IP:         addr,
 		IPDecimal:  iputil.ToDecimal(addr),
 		Country:    city.CountryName,
@@ -85,9 +96,4 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 		ASNOrg:     asn.AutonomousSystemOrganization,
 		Hostname:   hostname,
 	}
-
-	s.cache.Set(addr, response)
-	response.UserAgent = userAgentFromRequest(r)
-
-	return response, nil
 }

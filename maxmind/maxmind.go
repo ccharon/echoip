@@ -281,8 +281,8 @@ func touch(path string) error {
 	return os.Chtimes(path, now, now)
 }
 
-// withoutURL strips the request URL from an error, because it carries the
-// license key as a query parameter.
+// withoutURL strips the request URL from an error. The URL is of no use to
+// the reader and a redirect may have replaced it with a signed one.
 func withoutURL(err error) error {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
