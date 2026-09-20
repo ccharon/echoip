@@ -87,7 +87,8 @@ server {
 
 The rate limit covers the one expensive path. A page view is served from
 memory, while a reverse lookup for an address outside the cache waits on DNS,
-up to two seconds when there is no PTR record. Ten requests per second with a
+tens of milliseconds in the usual case and up to the two second deadline when
+the resolver does not answer. Ten requests per second with a
 burst of twenty is far above what a browser or a CLI client does. `/health` is
 exempt so that monitoring is never throttled, and a client over the limit gets
 `429`.
