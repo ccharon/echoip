@@ -9,8 +9,8 @@ import (
 
 // Cache keeps responses by address, which saves the reverse lookup that the
 // response needs. A capacity of zero disables it. When it is full the entry
-// that was inserted first is dropped, because reading an entry does not move
-// it.
+// that was read longest ago is dropped, so a client that keeps asking stays
+// cached however many strangers pass through.
 type Cache struct {
 	mu        sync.RWMutex
 	capacity  int
@@ -53,14 +53,18 @@ func (c *Cache) Set(addr netip.Addr, resp Response) {
 	c.entries[addr] = c.values.PushBack(resp)
 }
 
+// Get takes the write lock, because a hit moves its entry to the back of the
+// eviction order.
 func (c *Cache) Get(addr netip.Addr) (Response, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	el, ok := c.entries[addr]
 	if !ok {
 		return Response{}, false
 	}
+	c.values.MoveToBack(el)
+
 	return el.Value.(Response), true
 }
 
@@ -101,7 +105,8 @@ func (c *Cache) Stats() CacheStats {
 	}
 }
 
-// evict drops the n oldest entries. The caller holds the write lock.
+// evict drops the n entries that were read longest ago. The caller holds the
+// write lock.
 func (c *Cache) evict(n int) {
 	for el := c.values.Front(); n > 0 && el != nil; n-- {
 		next := el.Next()
