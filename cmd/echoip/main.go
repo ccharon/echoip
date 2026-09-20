@@ -81,8 +81,8 @@ func parseFlags(args []string, output io.Writer) (*options, error) {
 	fs.IntVar(&opts.cacheSize, "C", 0, "Size of the response cache. 0 disables caching")
 	fs.BoolVar(&opts.profile, "P", false, "Register the pprof and cache handlers below /debug")
 	fs.DurationVar(&opts.updateInterval, "u", defaultUpdateInterval,
-		"Interval for checking MaxMind for new GeoIP databases. Requires "+accountIDEnv+" and "+
-			licenseKeyEnv+". 0 disables checking")
+		"Interval for checking MaxMind for new GeoIP databases, e.g. 24h or 90m. "+
+			"Requires "+accountIDEnv+" and "+licenseKeyEnv+". 0 disables checking and asks for neither")
 	fs.BoolVar(&opts.showVersion, "V", false, "Print the version and exit")
 	fs.Func("H", "Header to trust for the remote IP, e.g. X-Real-IP. May be repeated", func(v string) error {
 		opts.headers = append(opts.headers, v)
@@ -151,13 +151,8 @@ func main() {
 		Interval:   opts.updateInterval,
 		Databases:  editions(opts.cityFile, opts.asnFile),
 	}
-	if len(updater.Databases) > 0 {
-		if updater.AccountID == "" {
-			log.Fatalf("%s must be set to download the GeoIP databases", accountIDEnv)
-		}
-		if updater.LicenseKey == "" {
-			log.Fatalf("%s must be set to download the GeoIP databases", licenseKeyEnv)
-		}
+	if env := missingCredential(updater); env != "" {
+		log.Fatalf("%s must be set to download the GeoIP databases", env)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -204,6 +199,22 @@ func prefixList(prefixes []netip.Prefix) string {
 		parts[i] = p.String()
 	}
 	return strings.Join(parts, ", ")
+}
+
+// missingCredential names the environment variable the updater needs and does
+// not have. An updater that never runs needs none, which leaves the database
+// files to whatever put them there.
+func missingCredential(u *maxmind.Updater) string {
+	if len(u.Databases) == 0 || u.Interval <= 0 {
+		return ""
+	}
+	if u.AccountID == "" {
+		return accountIDEnv
+	}
+	if u.LicenseKey == "" {
+		return licenseKeyEnv
+	}
+	return ""
 }
 
 // serverConfig turns the flags into the server configuration and reports what

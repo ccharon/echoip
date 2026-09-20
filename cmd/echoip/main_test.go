@@ -192,3 +192,29 @@ func TestPrefixList(t *testing.T) {
 		t.Errorf("got %q, want empty", got)
 	}
 }
+
+func TestMissingCredential(t *testing.T) {
+	databases := map[string]string{maxmind.EditionASN: "asn.mmdb"}
+
+	tests := []struct {
+		name string
+		u    maxmind.Updater
+		want string
+	}{
+		{"complete", maxmind.Updater{AccountID: "1", LicenseKey: "k", Interval: time.Hour, Databases: databases}, ""},
+		{"no account", maxmind.Updater{LicenseKey: "k", Interval: time.Hour, Databases: databases}, accountIDEnv},
+		{"no key", maxmind.Updater{AccountID: "1", Interval: time.Hour, Databases: databases}, licenseKeyEnv},
+		{"account is reported first", maxmind.Updater{Interval: time.Hour, Databases: databases}, accountIDEnv},
+		// Without an interval nothing is downloaded, so nothing is needed.
+		{"checking disabled", maxmind.Updater{Databases: databases}, ""},
+		{"no databases", maxmind.Updater{Interval: time.Hour}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := missingCredential(&tt.u); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
