@@ -24,7 +24,6 @@ type City struct {
 	Longitude   float64
 	PostalCode  string
 	Timezone    string
-	MetroCode   uint
 	RegionName  string
 	RegionCode  string
 	CountryName string
@@ -145,11 +144,6 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 
 	if record.Location.Longitude != nil {
 		city.Longitude = *record.Location.Longitude
-	}
-
-	// Metro code is US Only https://maxmind.github.io/GeoIP2-dotnet/doc/v2.7.1/html/P_MaxMind_GeoIP2_Model_Location_MetroCode.htm
-	if record.Location.MetroCode > 0 && record.Country.ISOCode == "US" {
-		city.MetroCode = record.Location.MetroCode
 	}
 
 	city.PostalCode = record.Postal.Code

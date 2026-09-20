@@ -401,7 +401,7 @@ func TestRunRetriesAfterFailedDownload(t *testing.T) {
 		Databases:  map[string]string{"GeoLite2-ASN": filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	updated := make(chan struct{}, 1)
@@ -537,7 +537,7 @@ func TestRunRefreshesRepeatedly(t *testing.T) {
 		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	reloads := make(chan struct{}, 8)
@@ -660,7 +660,7 @@ func TestRunSkipsReloadWhenUnchanged(t *testing.T) {
 		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	var reloads atomic.Int32
