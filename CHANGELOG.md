@@ -6,6 +6,10 @@
 
 - `MAXMIND_ACCOUNT_ID` is required beside `GEOIP_LICENSE_KEY`. Downloads use the current MaxMind endpoint, which authenticates with HTTP basic auth instead of a license key in the query string.
 
+### Changed
+
+- The MaxMind credentials are required only when a database is configured and `-u` is not `0`. A server that is handed its database files and never checks for new ones asks for neither.
+
 ### Fixed
 
 - `country_eu` follows the country of the address alone. The registered country says where the block is registered, not where it is used, so a block registered in the EU and used elsewhere reported `true`.
