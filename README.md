@@ -175,8 +175,9 @@ Keep the listening address unreachable from the internet while they are on.
   empty.
 - A failed check is logged and retried after 15 minutes. The previously
   downloaded databases stay in use.
-- A database that is damaged after it was written goes unnoticed, because the
-  conditional request still answers `304`. Delete the file to force a download.
+- A database that is damaged after it was written is not downloaded again,
+  because the conditional request still answers `304`. Every failed lookup is
+  logged, so delete the file to force a download.
 - `SIGTERM` and `SIGINT` stop the listener and give running requests up to 10
   seconds to finish.
 - The image carries the CA bundle of the build stage. A root that expires or a
