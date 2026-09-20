@@ -126,7 +126,7 @@ func (u *Updater) Update(ctx context.Context) (bool, error) {
 
 // Run checks the databases every Interval until ctx is done, and calls
 // onUpdate whenever a check brought new data. A failed check is retried after
-// retryInterval.
+// retryDelay.
 func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 	if u.Interval <= 0 {
 		return
