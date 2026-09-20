@@ -26,11 +26,14 @@ install:
 databases := GeoLite2-City GeoLite2-ASN
 
 $(databases):
+ifndef MAXMIND_ACCOUNT_ID
+	$(error MAXMIND_ACCOUNT_ID must be set. Please see https://dev.maxmind.com/geoip/updating-databases/)
+endif
 ifndef GEOIP_LICENSE_KEY
-	$(error GEOIP_LICENSE_KEY must be set. Please see https://blog.maxmind.com/2019/12/18/significant-changes-to-accessing-and-using-geolite2-databases/)
+	$(error GEOIP_LICENSE_KEY must be set. Please see https://dev.maxmind.com/geoip/updating-databases/)
 endif
 	mkdir -p data
-	@curl -fsSL -m 30 "https://download.maxmind.com/app/geoip_download?edition_id=$@&license_key=$(GEOIP_LICENSE_KEY)&suffix=tar.gz" | tar $(TAR_OPTS) --strip-components=1 -C $(CURDIR)/data -xzf - '*.mmdb'
+	@curl -fsSL -m 30 -u "$(MAXMIND_ACCOUNT_ID):$(GEOIP_LICENSE_KEY)" "https://download.maxmind.com/geoip/databases/$@/download?suffix=tar.gz" | tar $(TAR_OPTS) --strip-components=1 -C $(CURDIR)/data -xzf - '*.mmdb'
 
 geoip-download: $(databases)
 
@@ -47,7 +50,7 @@ docker-login:
 	$(DOCKER) login --username "$(DOCKER_USERNAME)" --password "$(DOCKER_PASSWORD)"
 
 docker-test:
-	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)))
+	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --env MAXMIND_ACCOUNT_ID --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)))
 	$(eval DOCKER_PORT=$(shell $(DOCKER) port $(CONTAINER) | cut -d ":" -f 2))
 	curl -fsS -m 5 localhost:$(DOCKER_PORT) > /dev/null; $(DOCKER) stop $(CONTAINER)
 
@@ -55,7 +58,7 @@ docker-push: docker-test docker-login
 	$(DOCKER) push $(DOCKER_IMAGE)
 
 docker-run:
-	$(DOCKER) run --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish 127.0.0.1:8080:8080 $(DOCKER_IMAGE)
+	$(DOCKER) run --env MAXMIND_ACCOUNT_ID --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish 127.0.0.1:8080:8080 $(DOCKER_IMAGE)
 
 run:
 	go run ./cmd/echoip -a data/GeoLite2-ASN.mmdb -c data/GeoLite2-City.mmdb -r -C 1000 -H X-Real-IP

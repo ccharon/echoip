@@ -1,6 +1,9 @@
 Dockerfile
 .git
 .github
+nginx.conf
+screenshot.png
 .idea
 data
+maxmind-accountid.txt
 maxmind-license.txt

@@ -11,18 +11,25 @@ ASN data from the MaxMind GeoLite2 databases. The response format follows the
 Fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/echoip), which is
 a fork of [mpolden/echoip](https://github.com/mpolden/echoip).
 
-![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/doc/screenshot.png)
+unfortunately version 2.0 had a rough start, there are breaking changes in
+2.0.1 and 2.0.2 due to the changed maxmind api and some hardening which led me
+to remove some cli parameters. Also the automatic db download requires
+MAXMIND_ACCOUNT_ID and GEOIP_LICENSE_KEY env vars. Details see below.
+
+![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/screenshot.png)
 
 ## Run
 
 The container downloads the GeoLite2 databases on first start and checks for
 new ones once a day. They live in a mounted volume, which keeps them across
-restarts and out of the image. This needs a MaxMind license key, free after
-registration at [maxmind.com](https://www.maxmind.com).
+restarts and out of the image. This needs a MaxMind account, free after
+registration at [maxmind.com](https://www.maxmind.com). Both the account ID and
+a license key are required, because the download authenticates with them.
 
-Put the key in a `.env` file next to `docker-compose.yml`:
+Put them in a `.env` file next to `docker-compose.yml`:
 
 ```
+MAXMIND_ACCOUNT_ID=your-account-id
 GEOIP_LICENSE_KEY=your-key
 ```
 
@@ -43,6 +50,7 @@ services:
     ports:
       - "127.0.0.1:8082:8080"
     environment:
+      MAXMIND_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID:?set MAXMIND_ACCOUNT_ID in .env}
       GEOIP_LICENSE_KEY: ${GEOIP_LICENSE_KEY:?set GEOIP_LICENSE_KEY in .env}
     deploy:
       resources:
@@ -73,7 +81,7 @@ networks:
 
 The service speaks plain HTTP and belongs behind a proxy that terminates TLS,
 sets the trusted header and limits the request rate. A working configuration is
-in [doc/nginx.md](https://raw.githubusercontent.com/ccharon/echoip/master/doc/nginx.md).
+in [nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/master/nginx.conf).
 
 ## Endpoints
 
@@ -112,24 +120,31 @@ $ curl echoip.example.com/json
 
 | Name | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `GEOIP_LICENSE_KEY` | environment | none | MaxMind license key. Required when `-c` or `-a` is set, otherwise the server exits on start. |
+| `MAXMIND_ACCOUNT_ID` | environment | none | MaxMind account ID. Required when a database is configured and `-u` is not `0`, otherwise the server exits on start. |
+| `GEOIP_LICENSE_KEY` | environment | none | MaxMind license key. Required alongside the account ID. |
 | `-a` | string | none | Path to the GeoIP ASN database |
 | `-c` | string | none | Path to the GeoIP city database |
-| `-u` | duration | `24h` | Interval for checking MaxMind for new databases. `0` disables checking. |
+| `-u` | int | `24` | Hours between checks for new databases. `0` disables checking, and then no credentials are needed. |
 | `-l` | string | `:8080` | Listening address. An empty host listens on all interfaces, IPv4 and IPv6. `0.0.0.0:8080` is IPv4 only, `127.0.0.1:8080` is loopback only. |
 | `-H` | string, repeatable | none | Header to trust for the remote IP, e.g. `X-Real-IP` |
 | `-T` | string, repeatable | any peer | Networks whose requests may set the headers from `-H`, e.g. `10.0.0.0/8` or a single address |
 | `-r` | bool | `false` | Perform reverse hostname lookups |
-| `-C` | int | `0` | Size of the response cache. `0` disables caching. |
+| `-C` | int | `0` | Number of responses to cache. The entry read longest ago is dropped when it is full. `0` disables caching. |
 | `-P` | bool | `false` | Register the pprof and cache handlers below `/debug` |
 
 `-V` prints the version and exits. The image sets `-c`, `-a`, `-r`, `-C 1000`
 and `-H X-Real-IP` in its `ENTRYPOINT`, so the table describes the binary.
 
-`-c` and `-a` also tell the updater where to write. The license key is read
-from the environment rather than a flag, because flags are visible in the
-process list. The browser page is built into the binary, so there is nothing to
-point at a template directory.
+`-c` and `-a` also tell the updater where to write. The credentials are read
+from the environment rather than from flags, because flags are visible in the
+process list. They are sent as HTTP basic auth, so no URL carries them.
+
+`-u` counts whole hours. MaxMind rebuilds GeoLite2 twice a week and limits
+downloads per day, so a finer interval buys nothing and a coarser one such as
+`48` costs little.
+
+`-u 0` leaves the database files to whoever put them there, which is what
+`make geoip-download` or a volume filled from outside does.
 
 `-T` takes CIDR notation or a single address. A network with host bits set is
 refused rather than widened, so `-T 10.1.2.3/8` exits and names `10.0.0.0/8`.
@@ -145,8 +160,9 @@ The service answers unauthenticated requests from anyone.
 | Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`. |
 | Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`. |
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it. |
+| Requests are bounded | Headers are capped at 8 KiB, the body of `/debug/cache/resize` at 32 bytes, and an error quotes at most 128 characters of what the caller sent. |
 | The container runs as an unprivileged user | UID 65532, with a read-only root filesystem, no capabilities and `no-new-privileges`. |
-| The license key never reaches a log | It is read from the environment, and errors are stripped of the request URL that carries it. |
+| The credentials never reach a log | They are read from the environment and sent in an `Authorization` header, and errors are stripped of the request URL. |
 | Refused requests are logged | Every 4xx and 5xx is written with the peer address, the method, the target and the reason, quoted and cut at 128 characters. |
 
 Set `-H` only for headers the proxy overwrites, otherwise a caller picks the
@@ -154,7 +170,7 @@ address they are shown data for. `-T` narrows that to the networks the proxy
 connects from.
 
 `-P` registers handlers below `/debug` that are unauthenticated.
-`/debug/pprof/heap` hands out memory contents, which include the license key.
+`/debug/pprof/heap` hands out memory contents, which include the credentials.
 Keep the listening address unreachable from the internet while they are on.
 
 ## Limitations
@@ -164,10 +180,14 @@ Keep the listening address unreachable from the internet while they are on.
   empty.
 - A failed check is logged and retried after 15 minutes. The previously
   downloaded databases stay in use.
-- A database that is damaged after it was written goes unnoticed, because the
-  conditional request still answers `304`. Delete the file to force a download.
+- A database that is damaged after it was written is not downloaded again,
+  because the conditional request still answers `304`. Every failed lookup is
+  logged, so delete the file to force a download.
 - `SIGTERM` and `SIGINT` stop the listener and give running requests up to 10
   seconds to finish.
+- The image carries the CA bundle of the build stage. A root that expires or a
+  certificate chain that changes after the build breaks the MaxMind download
+  until the image is rebuilt.
 
 ## Development
 
@@ -180,17 +200,17 @@ make run              # needs GEOIP_LICENSE_KEY
 ## Release
 
 ```bash
-git tag -a v2.0.1 -m "v2.0.1"
-git push origin v2.0.1
+git tag -a v2.0.2 -m "v2.0.2"
+git push origin v2.0.2
 ```
 
-CI builds the image for the tag and publishes it as `2.0.1`, `2.0` and
+CI builds the image for the tag and publishes it as `2.0.2`, `2.0` and
 `sha-<commit>`. A push to `master` publishes `latest`. Tag the commit on
 `master`, because that is what the image is built from.
 
 ## License
 
-BSD 3-Clause, see [LICENSE](LICENSE). Copyright is held by Martin Polden for the
+BSD 3-Clause, see [LICENSE](https://raw.githubusercontent.com/ccharon/echoip/master/LICENSE). Copyright is held by Martin Polden for the
 original work and by Christian Charon for the changes in this fork.
 
 This product includes GeoLite2 data created by MaxMind, available from

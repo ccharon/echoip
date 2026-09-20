@@ -1,6 +1,7 @@
 package geo
 
 import (
+	"cmp"
 	"errors"
 	"net/netip"
 	"sync"
@@ -23,7 +24,6 @@ type City struct {
 	Longitude   float64
 	PostalCode  string
 	Timezone    string
-	MetroCode   uint
 	RegionName  string
 	RegionCode  string
 	CountryName string
@@ -106,7 +106,7 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	city := City{}
+	var city City
 
 	if d.city == nil || !addr.IsValid() {
 		return city, nil
@@ -118,41 +118,24 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 		return city, err
 	}
 
-	// City Database also includes Country Data
-	if c := record.Country.Names.English; c != "" {
-		city.CountryName = c
-	}
+	// The city database carries country records too. The registered country
+	// stands in when the country itself is unknown.
+	city.CountryName = cmp.Or(record.Country.Names.English, record.RegisteredCountry.Names.English)
+	city.CountryISO = cmp.Or(record.Country.ISOCode, record.RegisteredCountry.ISOCode)
 
-	if c := record.RegisteredCountry.Names.English; c != "" && city.CountryName == "" {
-		city.CountryName = c
-	}
-
-	if record.Country.ISOCode != "" {
-		city.CountryISO = record.Country.ISOCode
-	}
-
-	if record.RegisteredCountry.ISOCode != "" && city.CountryISO == "" {
-		city.CountryISO = record.RegisteredCountry.ISOCode
-	}
-
-	// Reported only when a country was found, so an address the database does
-	// not know omits the field like every other one.
+	// Only the country decides EU membership, because the registered country
+	// says where the block is registered rather than where it is used. It is
+	// left out entirely when no country was found.
 	if city.CountryName != "" || city.CountryISO != "" {
-		isEU := record.Country.IsInEuropeanUnion || record.RegisteredCountry.IsInEuropeanUnion
+		isEU := record.Country.IsInEuropeanUnion
 		city.CountryIsEU = &isEU
 	}
 
-	if c := record.City.Names.English; c != "" {
-		city.Name = c
-	}
+	city.Name = record.City.Names.English
 
 	if len(record.Subdivisions) > 0 {
-		if c := record.Subdivisions[0].Names.English; c != "" {
-			city.RegionName = c
-		}
-		if record.Subdivisions[0].ISOCode != "" {
-			city.RegionCode = record.Subdivisions[0].ISOCode
-		}
+		city.RegionName = record.Subdivisions[0].Names.English
+		city.RegionCode = record.Subdivisions[0].ISOCode
 	}
 
 	if record.Location.Latitude != nil {
@@ -163,18 +146,8 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 		city.Longitude = *record.Location.Longitude
 	}
 
-	// Metro code is US Only https://maxmind.github.io/GeoIP2-dotnet/doc/v2.7.1/html/P_MaxMind_GeoIP2_Model_Location_MetroCode.htm
-	if record.Location.MetroCode > 0 && record.Country.ISOCode == "US" {
-		city.MetroCode = record.Location.MetroCode
-	}
-
-	if record.Postal.Code != "" {
-		city.PostalCode = record.Postal.Code
-	}
-
-	if record.Location.TimeZone != "" {
-		city.Timezone = record.Location.TimeZone
-	}
+	city.PostalCode = record.Postal.Code
+	city.Timezone = record.Location.TimeZone
 
 	return city, nil
 }
@@ -183,24 +156,19 @@ func (d *Database) ASN(addr netip.Addr) (ASN, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	asn := ASN{}
 	if d.asn == nil || !addr.IsValid() {
-		return asn, nil
+		return ASN{}, nil
 	}
 
 	record, err := d.asn.ASN(addr.Unmap())
 	if err != nil {
-		return asn, err
+		return ASN{}, err
 	}
 
-	if record.AutonomousSystemNumber > 0 {
-		asn.AutonomousSystemNumber = record.AutonomousSystemNumber
-	}
-	if record.AutonomousSystemOrganization != "" {
-		asn.AutonomousSystemOrganization = record.AutonomousSystemOrganization
-	}
-
-	return asn, nil
+	return ASN{
+		AutonomousSystemNumber:       record.AutonomousSystemNumber,
+		AutonomousSystemOrganization: record.AutonomousSystemOrganization,
+	}, nil
 }
 
 func (d *Database) HasCity() bool {

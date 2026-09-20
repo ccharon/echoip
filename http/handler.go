@@ -1,8 +1,10 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 )
@@ -39,23 +41,28 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, message)
 }
 
-// logRefused records every request that was refused or failed, which is the
-// only trace an attempt to probe the service leaves. The peer address is
-// logged rather than the reported one, because a caller cannot choose it. The
-// target and the reason are quoted, because a caller picks their content and a
-// raw newline would forge a second line.
+// logRefused records a refused or failed request, the only trace a probe
+// leaves. The peer address is used because a caller cannot choose it, and the
+// values are quoted because a newline in them would forge a second line.
 func logRefused(r *http.Request, e *AppError) {
 	log.Printf("%s %s %q -> %d: %q", r.RemoteAddr, r.Method, clip(r.URL.RequestURI()), e.Code, clip(e.Error()))
 }
 
-// clip bounds a value a caller controls, so one request cannot fill the log
-// with a single line.
+const (
+	// maxValueLen bounds a value a caller controls, so one request cannot fill
+	// the log with a single line or have its input echoed back at length.
+	maxValueLen = 128
+
+	// maxResizeBody is wider than the longest int64 and narrower than anything
+	// worth reading into memory.
+	maxResizeBody = 32
+)
+
 func clip(s string) string {
-	const max = 128
-	if len(s) <= max {
+	if len(s) <= maxValueLen {
 		return s
 	}
-	return s[:max] + "..."
+	return s[:maxValueLen] + "..."
 }
 
 func wrapHandlerFunc(f http.HandlerFunc) appHandler {
@@ -66,9 +73,10 @@ func wrapHandlerFunc(f http.HandlerFunc) appHandler {
 }
 
 // requestError reports a request that could not be read, as JSON so that CLI
-// clients get a parsable answer.
+// clients get a parsable answer. The message is bounded, because an error may
+// quote what the caller sent.
 func requestError(err error) *AppError {
-	return badRequest(err).WithMessage(err.Error()).AsJSON()
+	return badRequest(err).WithMessage(clip(err.Error())).AsJSON()
 }
 
 // writeRaw writes without a trailing newline. A failed write means the client
@@ -108,7 +116,7 @@ func (s *Server) cliField(field func(Response) string) appHandler {
 // ipHandler answers with the address alone. It skips the geo lookups that the
 // other CLI handlers need.
 func (s *Server) ipHandler(w http.ResponseWriter, r *http.Request) *AppError {
-	ip, err := s.ipFromRequest(r, true)
+	ip, err := s.ipFromRequest(r)
 	if err != nil {
 		return requestError(err)
 	}
@@ -140,8 +148,10 @@ func (s *Server) cacheHandler(w http.ResponseWriter, _ *http.Request) *AppError 
 }
 
 func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *AppError {
+	// The body holds one number, so reading further would only let a caller
+	// decide how much is held in memory.
 	var capacity int
-	if _, err := fmt.Fscan(r.Body, &capacity); err != nil {
+	if _, err := fmt.Fscan(io.LimitReader(r.Body, maxResizeBody), &capacity); err != nil {
 		return requestError(err)
 	}
 
@@ -176,9 +186,14 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 		JSON:         string(jsonData),
 	}
 
-	if err := pageTemplate.ExecuteTemplate(w, indexTemplate, &data); err != nil {
+	// Rendered into a buffer first, because a failure halfway through would
+	// otherwise leave a truncated page that no status code can take back.
+	var page bytes.Buffer
+	if err := pageTemplate.ExecuteTemplate(&page, indexTemplate, &data); err != nil {
 		return internalServerError(err)
 	}
+	writeRaw(w, page.String())
+
 	return nil
 }
 

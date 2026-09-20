@@ -62,6 +62,12 @@ func editionArchive(t *testing.T, edition string) []byte {
 	})
 }
 
+// requestedEdition reads the edition from the path, which is where the
+// download endpoint carries it.
+func requestedEdition(r *http.Request) string {
+	return strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), "/download")
+}
+
 // isChecksum reports whether the request asks for the checksum rather than the
 // archive.
 func isChecksum(r *http.Request) bool {
@@ -83,7 +89,7 @@ func serveMaxmind(t *testing.T) http.HandlerFunc {
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		edition := r.URL.Query().Get("edition_id")
+		edition := requestedEdition(r)
 		data, ok := archives[edition]
 		if !ok {
 			http.Error(w, "unknown edition", http.StatusNotFound)
@@ -131,6 +137,7 @@ func TestUpdateLeavesNoTempFiles(t *testing.T) {
 
 	dir := t.TempDir()
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
 		Databases:  map[string]string{EditionASN: filepath.Join(dir, "GeoLite2-ASN.mmdb")},
@@ -164,13 +171,14 @@ func TestExtractMissingDatabase(t *testing.T) {
 func TestUpdate(t *testing.T) {
 	var gotQuery []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		edition := r.URL.Query().Get("edition_id")
+		edition := requestedEdition(r)
 		data := editionArchive(t, edition)
 		if isChecksum(r) {
 			writeChecksum(w, edition, data)
 			return
 		}
-		gotQuery = append(gotQuery, edition+"|"+r.URL.Query().Get("license_key")+"|"+r.URL.Query().Get("suffix"))
+		id, key, _ := r.BasicAuth()
+		gotQuery = append(gotQuery, edition+"|"+id+":"+key+"|"+r.URL.Query().Get("suffix"))
 		_, _ = w.Write(data)
 	}))
 	defer srv.Close()
@@ -179,6 +187,7 @@ func TestUpdate(t *testing.T) {
 
 	dir := t.TempDir()
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
 		Databases: map[string]string{
@@ -196,7 +205,7 @@ func TestUpdate(t *testing.T) {
 	}
 
 	// Editions are requested in a stable order.
-	want := []string{"GeoLite2-ASN|secret|tar.gz", "GeoLite2-City|secret|tar.gz"}
+	want := []string{"GeoLite2-ASN|12345:secret|tar.gz", "GeoLite2-City|12345:secret|tar.gz"}
 	if len(gotQuery) != len(want) {
 		t.Fatalf("got %v, want %v", gotQuery, want)
 	}
@@ -231,6 +240,7 @@ func TestUpdateKeepsExistingDatabaseOnError(t *testing.T) {
 	}
 
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
 		Databases:  map[string]string{"GeoLite2-ASN": path},
@@ -263,6 +273,7 @@ func TestUpdateErrorHidesLicenseKey(t *testing.T) {
 	defer swapDownloadURL(url)()
 
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
 		Databases:  map[string]string{"GeoLite2-ASN": filepath.Join(t.TempDir(), "db.mmdb")},
@@ -322,10 +333,11 @@ func TestEnabled(t *testing.T) {
 		u    Updater
 		want bool
 	}{
-		{"complete", Updater{LicenseKey: "k", Interval: time.Hour, Databases: databases}, true},
-		{"no key", Updater{Interval: time.Hour, Databases: databases}, false},
-		{"no interval", Updater{LicenseKey: "k", Databases: databases}, false},
-		{"no databases", Updater{LicenseKey: "k", Interval: time.Hour}, false},
+		{"complete", Updater{AccountID: "1", LicenseKey: "k", Interval: time.Hour, Databases: databases}, true},
+		{"no account", Updater{LicenseKey: "k", Interval: time.Hour, Databases: databases}, false},
+		{"no key", Updater{AccountID: "1", Interval: time.Hour, Databases: databases}, false},
+		{"no interval", Updater{AccountID: "1", LicenseKey: "k", Databases: databases}, false},
+		{"no databases", Updater{AccountID: "1", LicenseKey: "k", Interval: time.Hour}, false},
 	}
 
 	for _, tt := range tests {
@@ -363,7 +375,7 @@ func TestRetryDelay(t *testing.T) {
 func TestRunRetriesAfterFailedDownload(t *testing.T) {
 	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		edition := r.URL.Query().Get("edition_id")
+		edition := requestedEdition(r)
 		data := editionArchive(t, edition)
 		if isChecksum(r) {
 			writeChecksum(w, edition, data)
@@ -383,12 +395,13 @@ func TestRunRetriesAfterFailedDownload(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   10 * time.Millisecond,
 		Databases:  map[string]string{"GeoLite2-ASN": filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	updated := make(chan struct{}, 1)
@@ -444,6 +457,7 @@ func TestNextRefreshCountsFromDatabaseAge(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "GeoLite2-ASN.mmdb")
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   14 * 24 * time.Hour,
 		Databases:  map[string]string{EditionASN: path},
@@ -482,7 +496,7 @@ func TestNextRefreshCountsFromDatabaseAge(t *testing.T) {
 }
 
 func TestRunStopsWithoutInterval(t *testing.T) {
-	u := &Updater{LicenseKey: "secret", Databases: map[string]string{EditionASN: "unused"}}
+	u := &Updater{AccountID: "12345", LicenseKey: "secret", Databases: map[string]string{EditionASN: "unused"}}
 
 	done := make(chan struct{})
 	go func() {
@@ -500,7 +514,7 @@ func TestRunStopsWithoutInterval(t *testing.T) {
 func TestRunRefreshesRepeatedly(t *testing.T) {
 	var downloads atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		edition := r.URL.Query().Get("edition_id")
+		edition := requestedEdition(r)
 		data := editionArchive(t, edition)
 		if isChecksum(r) {
 			writeChecksum(w, edition, data)
@@ -517,12 +531,13 @@ func TestRunRefreshesRepeatedly(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   20 * time.Millisecond,
 		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	reloads := make(chan struct{}, 8)
@@ -552,7 +567,7 @@ func TestUpdateSendsConditionalRequest(t *testing.T) {
 	var gotCondition string
 	var served atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		edition := r.URL.Query().Get("edition_id")
+		edition := requestedEdition(r)
 		data := editionArchive(t, edition)
 		if isChecksum(r) {
 			writeChecksum(w, edition, data)
@@ -571,6 +586,7 @@ func TestUpdateSendsConditionalRequest(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
 		Databases:  map[string]string{EditionASN: path},
@@ -618,7 +634,7 @@ func TestUpdateSendsConditionalRequest(t *testing.T) {
 func TestRunSkipsReloadWhenUnchanged(t *testing.T) {
 	var served atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		edition := r.URL.Query().Get("edition_id")
+		edition := requestedEdition(r)
 		data := editionArchive(t, edition)
 		if isChecksum(r) {
 			writeChecksum(w, edition, data)
@@ -638,12 +654,13 @@ func TestRunSkipsReloadWhenUnchanged(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   20 * time.Millisecond,
 		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	var reloads atomic.Int32
@@ -671,7 +688,7 @@ func TestRunSkipsReloadWhenUnchanged(t *testing.T) {
 
 func TestUpdateRejectsWrongChecksum(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		edition := r.URL.Query().Get("edition_id")
+		edition := requestedEdition(r)
 		if isChecksum(r) {
 			// A checksum for a different archive than the one served.
 			writeChecksum(w, edition, []byte("something else"))
@@ -686,6 +703,7 @@ func TestUpdateRejectsWrongChecksum(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "GeoLite2-ASN.mmdb")
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
 		Databases:  map[string]string{EditionASN: path},
@@ -717,7 +735,7 @@ func TestUpdateRejectsWrongChecksum(t *testing.T) {
 
 func TestUpdateKeepsDatabaseOnWrongChecksum(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		edition := r.URL.Query().Get("edition_id")
+		edition := requestedEdition(r)
 		if isChecksum(r) {
 			writeChecksum(w, edition, []byte("something else"))
 			return
@@ -734,6 +752,7 @@ func TestUpdateKeepsDatabaseOnWrongChecksum(t *testing.T) {
 	}
 
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
 		Databases:  map[string]string{EditionASN: path},
@@ -757,7 +776,8 @@ func TestChecksumErrorHidesLicenseKey(t *testing.T) {
 	// request URL unless it is stripped.
 	defer swapDownloadURL("http://127.0.0.1:1")()
 
-	u := &Updater{LicenseKey: "super-secret", Interval: time.Hour}
+	u := &Updater{AccountID: "12345",
+		LicenseKey: "super-secret", Interval: time.Hour}
 
 	err := u.verify(context.Background(), EditionASN, []byte{1, 2, 3})
 	if err == nil {
@@ -785,6 +805,7 @@ func TestUpdateRefusesSchemeChange(t *testing.T) {
 	defer swapDownloadURL(redirect.URL)()
 
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "super-secret",
 		Interval:   time.Hour,
 		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "db.mmdb")},
@@ -824,6 +845,7 @@ func TestUpdateFollowsSameSchemeRedirect(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "db.mmdb")
 	u := &Updater{
+		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
 		Databases:  map[string]string{EditionASN: path},
@@ -834,5 +856,30 @@ func TestUpdateFollowsSameSchemeRedirect(t *testing.T) {
 	}
 	if !updated {
 		t.Error("expected the database to be written")
+	}
+}
+
+// The credentials belong in a header, so no URL a log or an error carries can
+// hold them.
+func TestRequestUsesBasicAuth(t *testing.T) {
+	u := &Updater{AccountID: "12345", LicenseKey: "secret"}
+
+	req, err := u.request(context.Background(), EditionASN, "tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id, key, ok := req.BasicAuth()
+	if !ok {
+		t.Fatal("expected basic auth to be set")
+	}
+	if id != "12345" || key != "secret" {
+		t.Errorf("got %q:%q, want 12345:secret", id, key)
+	}
+	if got := req.URL.String(); !strings.HasSuffix(got, "/GeoLite2-ASN/download?suffix=tar.gz") {
+		t.Errorf("unexpected URL: %s", got)
+	}
+	if strings.Contains(req.URL.String(), "secret") || strings.Contains(req.URL.String(), "12345") {
+		t.Errorf("credentials leak into the URL: %s", req.URL)
 	}
 }

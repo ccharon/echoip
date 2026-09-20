@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -17,7 +18,7 @@ func lookupAddr(netip.Addr) (string, error) { return "localhost", nil }
 type testDb struct{}
 
 func (t *testDb) City(netip.Addr) (geo.City, error) {
-	return geo.City{Name: "Bornyasherk", RegionName: "North Elbonia", RegionCode: "1234", MetroCode: 1234, PostalCode: "1234", Latitude: 63.416667, Longitude: 10.416667, Timezone: "Europe/Bornyasherk", CountryName: "Elbonia", CountryISO: "EB", CountryIsEU: new(bool)}, nil
+	return geo.City{Name: "Bornyasherk", RegionName: "North Elbonia", RegionCode: "1234", PostalCode: "1234", Latitude: 63.416667, Longitude: 10.416667, Timezone: "Europe/Bornyasherk", CountryName: "Elbonia", CountryISO: "EB", CountryIsEU: new(bool)}, nil
 }
 
 func (t *testDb) ASN(netip.Addr) (geo.ASN, error) {
@@ -227,6 +228,68 @@ func TestLogLineIsBounded(t *testing.T) {
 	}
 }
 
+// A body that is not a number must not decide how much the server reads or how
+// much it sends back.
+func TestCacheResizeBoundsTheBody(t *testing.T) {
+	log.SetOutput(io.Discard)
+	srv := testServer()
+	srv.cfg.Profile = true
+	s := httptest.NewServer(srv.Handler())
+
+	res, got, err := httpPost(s.URL+"/debug/cache/resize", strings.Repeat("9", 1<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 400 {
+		t.Errorf("expected 400, got %d", res.StatusCode)
+	}
+	if len(got) > 512 {
+		t.Errorf("expected a bounded answer, got %d bytes", len(got))
+	}
+	if strings.Count(got, "9") > maxResizeBody {
+		t.Errorf("the answer repeats the body: %q", got)
+	}
+}
+
+// failingDB stands in for a database file that opened and then went bad.
+type failingDB struct{ testDb }
+
+func (*failingDB) City(netip.Addr) (geo.City, error) {
+	return geo.City{}, errors.New("city database is unreadable")
+}
+
+func (*failingDB) ASN(netip.Addr) (geo.ASN, error) {
+	return geo.ASN{}, errors.New("asn database is unreadable")
+}
+
+// A lookup that fails has to leave a trace, because an address the database
+// does not hold returns no error at all.
+func TestFailedLookupIsLogged(t *testing.T) {
+	var logged strings.Builder
+	log.SetOutput(&logged)
+	defer log.SetOutput(io.Discard)
+
+	server := New(Config{}, &failingDB{}, NewCache(0))
+	s := httptest.NewServer(server.Handler())
+
+	out, status, err := httpGet(s.URL+"/json", "", "curl/7.43.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 200 {
+		t.Errorf("expected the response without geo data, got %d", status)
+	}
+	if !strings.Contains(out, `"ip": "127.0.0.1"`) {
+		t.Errorf("expected the address in %q", out)
+	}
+
+	for _, want := range []string{"City lookup failed", "ASN lookup failed", "127.0.0.1"} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("expected %q in the log %q", want, logged.String())
+		}
+	}
+}
+
 func TestPrivateIPParameter(t *testing.T) {
 	log.SetOutput(io.Discard)
 	s := httptest.NewServer(testServer().Handler())
@@ -302,7 +365,7 @@ func TestJSONHandlers(t *testing.T) {
 		out    string
 		status int
 	}{
-		{s.URL, "{\n  \"ip\": \"127.0.0.1\",\n  \"ip_decimal\": 2130706433,\n  \"country\": \"Elbonia\",\n  \"country_iso\": \"EB\",\n  \"country_eu\": false,\n  \"region_name\": \"North Elbonia\",\n  \"region_code\": \"1234\",\n  \"metro_code\": 1234,\n  \"zip_code\": \"1234\",\n  \"city\": \"Bornyasherk\",\n  \"latitude\": 63.416667,\n  \"longitude\": 10.416667,\n  \"time_zone\": \"Europe/Bornyasherk\",\n  \"asn\": \"AS59795\",\n  \"asn_org\": \"Hosting4Real\",\n  \"hostname\": \"localhost\",\n  \"user_agent\": {\n    \"product\": \"curl\",\n    \"version\": \"7.2.6.0\",\n    \"raw_value\": \"curl/7.2.6.0\"\n  }\n}", 200},
+		{s.URL, "{\n  \"ip\": \"127.0.0.1\",\n  \"ip_decimal\": 2130706433,\n  \"country\": \"Elbonia\",\n  \"country_iso\": \"EB\",\n  \"country_eu\": false,\n  \"region_name\": \"North Elbonia\",\n  \"region_code\": \"1234\",\n  \"zip_code\": \"1234\",\n  \"city\": \"Bornyasherk\",\n  \"latitude\": 63.416667,\n  \"longitude\": 10.416667,\n  \"time_zone\": \"Europe/Bornyasherk\",\n  \"asn\": \"AS59795\",\n  \"asn_org\": \"Hosting4Real\",\n  \"hostname\": \"localhost\",\n  \"user_agent\": {\n    \"product\": \"curl\",\n    \"version\": \"7.2.6.0\",\n    \"raw_value\": \"curl/7.2.6.0\"\n  }\n}", 200},
 		{s.URL + "/port/1337", "{\n  \"status\": 404,\n  \"error\": \"404 page not found\"\n}", 404},
 		{s.URL + "/foo", "{\n  \"status\": 404,\n  \"error\": \"404 page not found\"\n}", 404},
 		{s.URL + "/health", `{"status":"OK"}`, 200},
@@ -349,6 +412,9 @@ func TestCacheResizeHandler(t *testing.T) {
 	want := "{\n  \"message\": \"Changed cache capacity to 10.\"\n}"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+	if got := srv.cache.Stats().Capacity; got != 10 {
+		t.Errorf("capacity = %d, want 10", got)
 	}
 }
 

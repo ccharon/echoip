@@ -3,6 +3,7 @@ package maxmind
 
 import (
 	"archive/tar"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -29,11 +30,11 @@ const (
 )
 
 // Overridden in tests.
-var downloadURL = "https://download.maxmind.com/app/geoip_download"
+var downloadURL = "https://download.maxmind.com/geoip/databases"
 
-// The license key rides in the query string, which a redirect carries along,
-// so a hop that leaves the scheme of the first request would send it in the
-// clear.
+// Credentials and the signed URL a redirect leads to have no business on a
+// plain connection, so a hop that leaves the scheme of the first request is
+// refused.
 var client = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= maxRedirects {
@@ -65,6 +66,8 @@ const (
 )
 
 type Updater struct {
+	// AccountID and LicenseKey authenticate the download.
+	AccountID  string
 	LicenseKey string
 	// Databases maps a GeoLite2 edition ID to the file it is written to.
 	Databases map[string]string
@@ -74,7 +77,7 @@ type Updater struct {
 
 // Enabled reports whether this updater has everything it needs to download.
 func (u *Updater) Enabled() bool {
-	return u.LicenseKey != "" && u.Interval > 0 && len(u.Databases) > 0
+	return u.AccountID != "" && u.LicenseKey != "" && u.Interval > 0 && len(u.Databases) > 0
 }
 
 // Stale reports whether any database is missing or older than Interval.
@@ -124,7 +127,7 @@ func (u *Updater) Update(ctx context.Context) (bool, error) {
 
 // Run checks the databases every Interval until ctx is done, and calls
 // onUpdate whenever a check brought new data. A failed check is retried after
-// retryInterval.
+// retryDelay.
 func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 	if u.Interval <= 0 {
 		return
@@ -140,25 +143,28 @@ func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 		case <-timer.C:
 		}
 
-		var next time.Duration
-		changed, err := u.Update(ctx)
-		switch {
-		case err != nil:
-			log.Printf("GeoIP update failed: %v", err)
-			next = u.retryDelay()
-		case !changed:
-			next = u.nextRefresh()
-		default:
-			if err := onUpdate(); err != nil {
-				log.Printf("Reloading GeoIP databases failed: %v", err)
-				next = u.retryDelay()
-			} else {
-				log.Print("GeoIP databases updated")
-				next = u.nextRefresh()
-			}
-		}
-		timer.Reset(next)
+		timer.Reset(u.refresh(ctx, onUpdate))
 	}
+}
+
+// refresh runs one check and returns how long to wait for the next one.
+func (u *Updater) refresh(ctx context.Context, onUpdate func() error) time.Duration {
+	changed, err := u.Update(ctx)
+	if err != nil {
+		log.Printf("GeoIP update failed: %v", err)
+		return u.retryDelay()
+	}
+	if !changed {
+		return u.nextRefresh()
+	}
+
+	if err := onUpdate(); err != nil {
+		log.Printf("Reloading GeoIP databases failed: %v", err)
+		return u.retryDelay()
+	}
+	log.Print("GeoIP databases updated")
+
+	return u.nextRefresh()
 }
 
 // retryDelay never exceeds Interval, so a short Interval keeps its pace.
@@ -170,20 +176,10 @@ func (u *Updater) retryDelay() time.Duration {
 // request is conditional, so MaxMind answers 304 with an empty body while the
 // edition has not been rebuilt.
 func (u *Updater) download(ctx context.Context, edition, path string) (bool, error) {
-	timeout := u.Timeout
-	if timeout == 0 {
-		timeout = defaultTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, cmp.Or(u.Timeout, defaultTimeout))
 	defer cancel()
 
-	params := url.Values{
-		"edition_id":  {edition},
-		"license_key": {u.LicenseKey},
-		"suffix":      {"tar.gz"},
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL+"?"+params.Encode(), nil)
+	req, err := u.request(ctx, edition, "tar.gz")
 	if err != nil {
 		return false, withoutURL(err)
 	}
@@ -231,16 +227,25 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 	return true, os.Rename(tmp, path)
 }
 
+// request builds an authenticated GET for one file of an edition. The
+// credentials go in a header, so they stay out of the URL a log or an error
+// might carry.
+func (u *Updater) request(ctx context.Context, edition, suffix string) (*http.Request, error) {
+	target := downloadURL + "/" + url.PathEscape(edition) + "/download?suffix=" + url.QueryEscape(suffix)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(u.AccountID, u.LicenseKey)
+
+	return req, nil
+}
+
 // verify compares the archive against the checksum MaxMind publishes beside
 // it.
 func (u *Updater) verify(ctx context.Context, edition string, sum []byte) error {
-	params := url.Values{
-		"edition_id":  {edition},
-		"license_key": {u.LicenseKey},
-		"suffix":      {"tar.gz.sha256"},
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL+"?"+params.Encode(), nil)
+	req, err := u.request(ctx, edition, "tar.gz.sha256")
 	if err != nil {
 		return withoutURL(err)
 	}
@@ -276,11 +281,10 @@ func touch(path string) error {
 	return os.Chtimes(path, now, now)
 }
 
-// withoutURL strips the request URL from an error, because it carries the
-// license key as a query parameter.
+// withoutURL strips the request URL from an error. The URL is of no use to
+// the reader and a redirect may have replaced it with a signed one.
 func withoutURL(err error) error {
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
 		return urlErr.Err
 	}
 	return err

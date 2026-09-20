@@ -20,7 +20,7 @@ func TestCacheCapacity(t *testing.T) {
 	for i, tt := range tests {
 		c := NewCache(tt.capacity)
 		var responses []Response
-		for i := 0; i < tt.addCount; i++ {
+		for i := range tt.addCount {
 			ip := netip.MustParseAddr(fmt.Sprintf("192.0.2.%d", i))
 			r := Response{IP: ip}
 			responses = append(responses, r)
@@ -171,5 +171,37 @@ func TestCacheDisabled(t *testing.T) {
 
 	if _, ok := c.Get(ip); ok {
 		t.Error("expected a disabled cache to keep nothing")
+	}
+}
+
+// A read has to spare its entry from the next eviction, which is the whole
+// difference between this cache and one that drops in insertion order.
+func TestCacheEvictsLeastRecentlyRead(t *testing.T) {
+	c := NewCache(3)
+
+	a := netip.MustParseAddr("192.0.2.1")
+	b := netip.MustParseAddr("192.0.2.2")
+	d := netip.MustParseAddr("192.0.2.3")
+	e := netip.MustParseAddr("192.0.2.4")
+
+	for _, addr := range []netip.Addr{a, b, d} {
+		c.Set(addr, Response{IP: addr})
+	}
+
+	// a is the oldest by insertion. Reading it makes b the oldest by use.
+	if _, ok := c.Get(a); !ok {
+		t.Fatal("expected a to be cached")
+	}
+
+	c.Set(e, Response{IP: e})
+
+	if _, ok := c.Get(a); !ok {
+		t.Error("a was read last and must have survived")
+	}
+	if _, ok := c.Get(b); ok {
+		t.Error("b was read longest ago and must have been evicted")
+	}
+	if got, want := c.evictions, uint64(1); got != want {
+		t.Errorf("evictions = %d, want %d", got, want)
 	}
 }

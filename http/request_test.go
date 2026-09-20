@@ -40,7 +40,7 @@ func TestIPFromRequest(t *testing.T) {
 		}
 		r.Header.Add(tt.headerKey, tt.headerValue)
 		server := &Server{cfg: Config{IPHeaders: tt.trustedHeaders}}
-		addr, err := server.ipFromRequest(r, true)
+		addr, err := server.ipFromRequest(r)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -75,7 +75,7 @@ func TestIPFromRequestRefusesSuppliedPrivate(t *testing.T) {
 			}
 
 			server := &Server{cfg: Config{IPHeaders: []string{"X-Forwarded-For"}}}
-			addr, err := server.ipFromRequest(r, true)
+			addr, err := server.ipFromRequest(r)
 			if err == nil {
 				t.Fatalf("expected an error, got %s", addr)
 			}
@@ -96,7 +96,7 @@ func TestIPFromRequestAllowsPrivatePeer(t *testing.T) {
 		}
 		r := &http.Request{RemoteAddr: u.Host, Header: http.Header{}, URL: u}
 
-		addr, err := (&Server{}).ipFromRequest(r, true)
+		addr, err := (&Server{}).ipFromRequest(r)
 		if err != nil {
 			t.Fatalf("peer %s: %v", peer, err)
 		}
@@ -185,12 +185,13 @@ func TestTrustedProxies(t *testing.T) {
 		}
 
 		server := &Server{cfg: Config{IPHeaders: []string{"X-Real-IP"}, TrustedProxies: trusted}}
+		// No URL, so nothing reaches the ?ip= branch and the header decides.
 		r := &http.Request{
 			RemoteAddr: tt.peer,
 			Header:     http.Header{"X-Real-Ip": []string{"1.3.3.7"}},
 		}
 
-		addr, err := server.ipFromRequest(r, false)
+		addr, err := server.ipFromRequest(r)
 		if err != nil {
 			t.Fatal(err)
 		}
