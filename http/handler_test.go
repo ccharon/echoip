@@ -227,6 +227,54 @@ func TestLogLineIsBounded(t *testing.T) {
 	}
 }
 
+// A body that is not a number must not decide how much the server reads or how
+// much it sends back.
+func TestCacheResizeBoundsTheBody(t *testing.T) {
+	log.SetOutput(io.Discard)
+	server := testServer()
+	server.cfg.Profile = true
+	s := httptest.NewServer(server.Handler())
+
+	body := strings.Repeat("9", 1<<20)
+	res, err := http.Post(s.URL+"/debug/cache/resize", "text/plain", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	answer, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 400 {
+		t.Errorf("expected 400, got %d", res.StatusCode)
+	}
+	if len(answer) > 512 {
+		t.Errorf("expected a bounded answer, got %d bytes", len(answer))
+	}
+	if strings.Count(string(answer), "9") > maxResizeBody {
+		t.Errorf("the answer repeats the body: %q", answer)
+	}
+}
+
+// A capacity that fits is still applied.
+func TestCacheResizeApplies(t *testing.T) {
+	log.SetOutput(io.Discard)
+	server := testServer()
+	server.cfg.Profile = true
+	s := httptest.NewServer(server.Handler())
+
+	res, err := http.Post(s.URL+"/debug/cache/resize", "text/plain", strings.NewReader("42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+
+	if got := server.cache.Stats().Capacity; got != 42 {
+		t.Errorf("capacity = %d, want 42", got)
+	}
+}
+
 func TestPrivateIPParameter(t *testing.T) {
 	log.SetOutput(io.Discard)
 	s := httptest.NewServer(testServer().Handler())

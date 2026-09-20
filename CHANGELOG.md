@@ -9,6 +9,8 @@
 
 ### Changed
 
+- Request headers are capped at 8 KiB instead of the 1 MiB Go allows by default.
+- `POST /debug/cache/resize` reads at most 32 bytes, and an error message quotes at most 128 characters of the request. A megabyte of digits was read into memory and echoed back in full.
 - The response cache evicts the entry that was read longest ago instead of the one inserted first. A client that keeps asking stays cached however many one-time visitors pass through. A read takes the write lock now, which costs a map lookup and a pointer swap.
 - The MaxMind credentials are required only when a database is configured and `-u` is not `0`. A server that is handed its database files and never checks for new ones asks for neither.
 

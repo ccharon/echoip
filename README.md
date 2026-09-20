@@ -156,6 +156,7 @@ The service answers unauthenticated requests from anyone.
 | Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`. |
 | Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`. |
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it. |
+| Requests are bounded | Headers are capped at 8 KiB, the body of `/debug/cache/resize` at 32 bytes, and an error quotes at most 128 characters of what the caller sent. |
 | The container runs as an unprivileged user | UID 65532, with a read-only root filesystem, no capabilities and `no-new-privileges`. |
 | The credentials never reach a log | They are read from the environment and sent in an `Authorization` header, and errors are stripped of the request URL. |
 | Refused requests are logged | Every 4xx and 5xx is written with the peer address, the method, the target and the reason, quoted and cut at 128 characters. |
@@ -179,6 +180,9 @@ Keep the listening address unreachable from the internet while they are on.
   conditional request still answers `304`. Delete the file to force a download.
 - `SIGTERM` and `SIGINT` stop the listener and give running requests up to 10
   seconds to finish.
+- The image carries the CA bundle of the build stage. A root that expires or a
+  certificate chain that changes after the build breaks the MaxMind download
+  until the image is rebuilt.
 
 ## Development
 
