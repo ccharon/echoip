@@ -130,10 +130,9 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 		city.CountryISO = record.RegisteredCountry.ISOCode
 	}
 
-	// The registered country says where the block is registered, not where it
-	// is used, so only the country itself decides EU membership. Reported only
-	// when a country was found, so an address the database does not know omits
-	// the field like every other one.
+	// Only the country decides EU membership, because the registered country
+	// says where the block is registered rather than where it is used. It is
+	// left out entirely when no country was found.
 	if city.CountryName != "" || city.CountryISO != "" {
 		isEU := record.Country.IsInEuropeanUnion
 		city.CountryIsEU = &isEU

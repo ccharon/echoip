@@ -40,11 +40,9 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, message)
 }
 
-// logRefused records every request that was refused or failed, which is the
-// only trace an attempt to probe the service leaves. The peer address is
-// logged rather than the reported one, because a caller cannot choose it. The
-// target and the reason are quoted, because a caller picks their content and a
-// raw newline would forge a second line.
+// logRefused records a refused or failed request, the only trace a probe
+// leaves. The peer address is used because a caller cannot choose it, and the
+// values are quoted because a newline in them would forge a second line.
 func logRefused(r *http.Request, e *AppError) {
 	log.Printf("%s %s %q -> %d: %q", r.RemoteAddr, r.Method, clip(r.URL.RequestURI()), e.Code, clip(e.Error()))
 }

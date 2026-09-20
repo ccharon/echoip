@@ -7,10 +7,9 @@ import (
 	"sync"
 )
 
-// Cache keeps responses by address, which saves the reverse lookup that the
-// response needs. A capacity of zero disables it. When it is full the entry
-// that was read longest ago is dropped, so a client that keeps asking stays
-// cached however many strangers pass through.
+// Cache keeps responses by address, which saves the reverse lookup. A capacity
+// of zero disables it. A full cache drops the entry read longest ago, so a
+// client that keeps asking survives any number of one-time visitors.
 type Cache struct {
 	mu        sync.RWMutex
 	capacity  int
