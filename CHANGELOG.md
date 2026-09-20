@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- `/coordinates` answers with nothing when the address has no location. It formatted the zero value as `0.000000,0.000000`, a place in the Gulf of Guinea.
 - A failed GeoIP lookup is logged. An address the database does not hold returns no error, so a failure meant the file was unreadable, and the service answered without geo data and without a trace.
 - The browser page is rendered into a buffer before it is written. A template failure halfway through left a truncated page that the 500 could no longer take back.
 - `country_eu` follows the country of the address alone. The registered country says where the block is registered, not where it is used, so a block registered in the EU and used elsewhere reported `true`.
