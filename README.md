@@ -11,6 +11,11 @@ ASN data from the MaxMind GeoLite2 databases. The response format follows the
 Fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/echoip), which is
 a fork of [mpolden/echoip](https://github.com/mpolden/echoip).
 
+unfortunately version 2.0 had a rough start, there are breaking changes in
+2.0.1 and 2.0.2 due to the changed maxmind api and some hardening which led me
+to remove some cli parameters. Also the automatic db download requires
+MAXMIND_ACCOUNT_ID and GEOIP_LICENSE_KEY env vars. Details see below.
+
 ![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/screenshot.png)
 
 ## Run
