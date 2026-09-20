@@ -48,14 +48,15 @@ func logRefused(r *http.Request, e *AppError) {
 	log.Printf("%s %s %q -> %d: %q", r.RemoteAddr, r.Method, clip(r.URL.RequestURI()), e.Code, clip(e.Error()))
 }
 
-// clip bounds a value a caller controls, so one request cannot fill the log
-// with a single line.
+// maxValueLen bounds a value a caller controls, so one request cannot fill the
+// log with a single line.
+const maxValueLen = 128
+
 func clip(s string) string {
-	const max = 128
-	if len(s) <= max {
+	if len(s) <= maxValueLen {
 		return s
 	}
-	return s[:max] + "..."
+	return s[:maxValueLen] + "..."
 }
 
 func wrapHandlerFunc(f http.HandlerFunc) appHandler {
