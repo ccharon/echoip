@@ -32,8 +32,9 @@ const (
 )
 
 // MaxMind rebuilds GeoLite2 twice a week, and a check costs nothing while the
-// edition is unchanged.
-const defaultUpdateInterval = 24 * time.Hour
+// edition is unchanged. The interval is whole hours, because MaxMind counts
+// downloads per day and nothing below that resolution is useful here.
+const defaultUpdateHours = 24
 
 type options struct {
 	cityFile       string
@@ -42,7 +43,7 @@ type options struct {
 	headers        []string
 	trustedProxies []netip.Prefix
 	cacheSize      int
-	updateInterval time.Duration
+	updateHours    int
 	reverseLookup  bool
 	profile        bool
 	showVersion    bool
@@ -80,9 +81,9 @@ func parseFlags(args []string, output io.Writer) (*options, error) {
 	fs.BoolVar(&opts.reverseLookup, "r", false, "Perform reverse hostname lookups")
 	fs.IntVar(&opts.cacheSize, "C", 0, "Size of the response cache. 0 disables caching")
 	fs.BoolVar(&opts.profile, "P", false, "Register the pprof and cache handlers below /debug")
-	fs.DurationVar(&opts.updateInterval, "u", defaultUpdateInterval,
-		"Interval for checking MaxMind for new GeoIP databases, e.g. 24h or 90m. "+
-			"Requires "+accountIDEnv+" and "+licenseKeyEnv+". 0 disables checking and asks for neither")
+	fs.IntVar(&opts.updateHours, "u", defaultUpdateHours,
+		"Hours between checks for new GeoIP databases. Requires "+accountIDEnv+" and "+
+			licenseKeyEnv+". 0 disables checking and asks for neither")
 	fs.BoolVar(&opts.showVersion, "V", false, "Print the version and exit")
 	fs.Func("H", "Header to trust for the remote IP, e.g. X-Real-IP. May be repeated", func(v string) error {
 		opts.headers = append(opts.headers, v)
@@ -105,8 +106,17 @@ func parseFlags(args []string, output io.Writer) (*options, error) {
 		fs.Usage()
 		return nil, errors.New("unexpected arguments")
 	}
+	if opts.updateHours < 0 {
+		fs.Usage()
+		return nil, fmt.Errorf("-u must not be negative: %d", opts.updateHours)
+	}
 
 	return &opts, nil
+}
+
+// updateInterval is the flag value as a duration.
+func (o *options) updateInterval() time.Duration {
+	return time.Duration(o.updateHours) * time.Hour
 }
 
 // editions maps the GeoLite2 editions the updater downloads to the files the
@@ -148,7 +158,7 @@ func main() {
 	updater := &maxmind.Updater{
 		AccountID:  os.Getenv(accountIDEnv),
 		LicenseKey: os.Getenv(licenseKeyEnv),
-		Interval:   opts.updateInterval,
+		Interval:   opts.updateInterval(),
 		Databases:  editions(opts.cityFile, opts.asnFile),
 	}
 	if env := missingCredential(updater); env != "" {

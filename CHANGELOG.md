@@ -4,6 +4,7 @@
 
 ### Breaking
 
+- `-u` counts whole hours instead of taking a Go duration. `-u 24h` is now `-u 24`. MaxMind rebuilds GeoLite2 twice a week and limits downloads per day, so nothing below an hour is useful.
 - `MAXMIND_ACCOUNT_ID` is required beside `GEOIP_LICENSE_KEY`. Downloads use the current MaxMind endpoint, which authenticates with HTTP basic auth instead of a license key in the query string.
 
 ### Changed
