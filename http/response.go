@@ -32,8 +32,12 @@ type Response struct {
 }
 
 // Coordinates formats latitude and longitude the way the CLI response prints
-// them.
+// them. Without a location it answers with nothing, because 0,0 is a place in
+// the Gulf of Guinea rather than an absent one.
 func (r Response) Coordinates() string {
+	if r.Latitude == 0 && r.Longitude == 0 {
+		return ""
+	}
 	return formatCoordinate(r.Latitude) + "," + formatCoordinate(r.Longitude)
 }
 
