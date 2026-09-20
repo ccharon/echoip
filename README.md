@@ -11,7 +11,7 @@ ASN data from the MaxMind GeoLite2 databases. The response format follows the
 Fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/echoip), which is
 a fork of [mpolden/echoip](https://github.com/mpolden/echoip).
 
-![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/doc/screenshot.png)
+![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/screenshot.png)
 
 ## Run
 
@@ -76,7 +76,7 @@ networks:
 
 The service speaks plain HTTP and belongs behind a proxy that terminates TLS,
 sets the trusted header and limits the request rate. A working configuration is
-in [doc/nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/master/doc/nginx.conf).
+in [nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/master/nginx.conf).
 
 ## Endpoints
 

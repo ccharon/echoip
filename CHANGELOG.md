@@ -17,7 +17,7 @@
 
 ### Documentation
 
-- The nginx example is a configuration file rather than a fenced block in a Markdown page, so the link serves something a reader can save and nginx can read. Its prose moved into the comments it belongs to.
+- The nginx example is `nginx.conf` in the repository root rather than a fenced block in a Markdown page, so the link serves something a reader can save and nginx can read. Its prose moved into the comments it belongs to.
 
 ### Fixed
 
