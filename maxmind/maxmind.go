@@ -3,6 +3,7 @@ package maxmind
 
 import (
 	"archive/tar"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -142,25 +143,28 @@ func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 		case <-timer.C:
 		}
 
-		var next time.Duration
-		changed, err := u.Update(ctx)
-		switch {
-		case err != nil:
-			log.Printf("GeoIP update failed: %v", err)
-			next = u.retryDelay()
-		case !changed:
-			next = u.nextRefresh()
-		default:
-			if err := onUpdate(); err != nil {
-				log.Printf("Reloading GeoIP databases failed: %v", err)
-				next = u.retryDelay()
-			} else {
-				log.Print("GeoIP databases updated")
-				next = u.nextRefresh()
-			}
-		}
-		timer.Reset(next)
+		timer.Reset(u.refresh(ctx, onUpdate))
 	}
+}
+
+// refresh runs one check and returns how long to wait for the next one.
+func (u *Updater) refresh(ctx context.Context, onUpdate func() error) time.Duration {
+	changed, err := u.Update(ctx)
+	if err != nil {
+		log.Printf("GeoIP update failed: %v", err)
+		return u.retryDelay()
+	}
+	if !changed {
+		return u.nextRefresh()
+	}
+
+	if err := onUpdate(); err != nil {
+		log.Printf("Reloading GeoIP databases failed: %v", err)
+		return u.retryDelay()
+	}
+	log.Print("GeoIP databases updated")
+
+	return u.nextRefresh()
 }
 
 // retryDelay never exceeds Interval, so a short Interval keeps its pace.
@@ -172,11 +176,7 @@ func (u *Updater) retryDelay() time.Duration {
 // request is conditional, so MaxMind answers 304 with an empty body while the
 // edition has not been rebuilt.
 func (u *Updater) download(ctx context.Context, edition, path string) (bool, error) {
-	timeout := u.Timeout
-	if timeout == 0 {
-		timeout = defaultTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, cmp.Or(u.Timeout, defaultTimeout))
 	defer cancel()
 
 	req, err := u.request(ctx, edition, "tar.gz")

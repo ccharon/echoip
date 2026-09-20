@@ -231,47 +231,22 @@ func TestLogLineIsBounded(t *testing.T) {
 // much it sends back.
 func TestCacheResizeBoundsTheBody(t *testing.T) {
 	log.SetOutput(io.Discard)
-	server := testServer()
-	server.cfg.Profile = true
-	s := httptest.NewServer(server.Handler())
+	srv := testServer()
+	srv.cfg.Profile = true
+	s := httptest.NewServer(srv.Handler())
 
-	body := strings.Repeat("9", 1<<20)
-	res, err := http.Post(s.URL+"/debug/cache/resize", "text/plain", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = res.Body.Close() }()
-
-	answer, err := io.ReadAll(res.Body)
+	res, got, err := httpPost(s.URL+"/debug/cache/resize", strings.Repeat("9", 1<<20))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.StatusCode != 400 {
 		t.Errorf("expected 400, got %d", res.StatusCode)
 	}
-	if len(answer) > 512 {
-		t.Errorf("expected a bounded answer, got %d bytes", len(answer))
+	if len(got) > 512 {
+		t.Errorf("expected a bounded answer, got %d bytes", len(got))
 	}
-	if strings.Count(string(answer), "9") > maxResizeBody {
-		t.Errorf("the answer repeats the body: %q", answer)
-	}
-}
-
-// A capacity that fits is still applied.
-func TestCacheResizeApplies(t *testing.T) {
-	log.SetOutput(io.Discard)
-	server := testServer()
-	server.cfg.Profile = true
-	s := httptest.NewServer(server.Handler())
-
-	res, err := http.Post(s.URL+"/debug/cache/resize", "text/plain", strings.NewReader("42"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-
-	if got := server.cache.Stats().Capacity; got != 42 {
-		t.Errorf("capacity = %d, want 42", got)
+	if strings.Count(got, "9") > maxResizeBody {
+		t.Errorf("the answer repeats the body: %q", got)
 	}
 }
 
@@ -397,6 +372,9 @@ func TestCacheResizeHandler(t *testing.T) {
 	want := "{\n  \"message\": \"Changed cache capacity to 10.\"\n}"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+	if got := srv.cache.Stats().Capacity; got != 10 {
+		t.Errorf("capacity = %d, want 10", got)
 	}
 }
 

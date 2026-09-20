@@ -1,6 +1,7 @@
 package geo
 
 import (
+	"cmp"
 	"errors"
 	"net/netip"
 	"sync"
@@ -106,7 +107,7 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	city := City{}
+	var city City
 
 	if d.city == nil || !addr.IsValid() {
 		return city, nil
@@ -120,15 +121,8 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 
 	// The city database carries country records too. The registered country
 	// stands in when the country itself is unknown.
-	city.CountryName = record.Country.Names.English
-	if city.CountryName == "" {
-		city.CountryName = record.RegisteredCountry.Names.English
-	}
-
-	city.CountryISO = record.Country.ISOCode
-	if city.CountryISO == "" {
-		city.CountryISO = record.RegisteredCountry.ISOCode
-	}
+	city.CountryName = cmp.Or(record.Country.Names.English, record.RegisteredCountry.Names.English)
+	city.CountryISO = cmp.Or(record.Country.ISOCode, record.RegisteredCountry.ISOCode)
 
 	// Only the country decides EU membership, because the registered country
 	// says where the block is registered rather than where it is used. It is
@@ -168,20 +162,19 @@ func (d *Database) ASN(addr netip.Addr) (ASN, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	asn := ASN{}
 	if d.asn == nil || !addr.IsValid() {
-		return asn, nil
+		return ASN{}, nil
 	}
 
 	record, err := d.asn.ASN(addr.Unmap())
 	if err != nil {
-		return asn, err
+		return ASN{}, err
 	}
 
-	asn.AutonomousSystemNumber = record.AutonomousSystemNumber
-	asn.AutonomousSystemOrganization = record.AutonomousSystemOrganization
-
-	return asn, nil
+	return ASN{
+		AutonomousSystemNumber:       record.AutonomousSystemNumber,
+		AutonomousSystemOrganization: record.AutonomousSystemOrganization,
+	}, nil
 }
 
 func (d *Database) HasCity() bool {
