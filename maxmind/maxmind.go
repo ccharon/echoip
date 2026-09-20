@@ -284,8 +284,7 @@ func touch(path string) error {
 // withoutURL strips the request URL from an error. The URL is of no use to
 // the reader and a redirect may have replaced it with a signed one.
 func withoutURL(err error) error {
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
 		return urlErr.Err
 	}
 	return err

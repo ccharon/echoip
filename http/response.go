@@ -19,7 +19,6 @@ type Response struct {
 	CountryEU  *bool                `json:"country_eu,omitempty"`
 	RegionName string               `json:"region_name,omitempty"`
 	RegionCode string               `json:"region_code,omitempty"`
-	MetroCode  uint                 `json:"metro_code,omitempty"`
 	PostalCode string               `json:"zip_code,omitempty"`
 	City       string               `json:"city,omitempty"`
 	Latitude   float64              `json:"latitude,omitempty"`
@@ -86,7 +85,6 @@ func (s *Server) lookup(addr netip.Addr) Response {
 		CountryEU:  city.CountryIsEU,
 		RegionName: city.RegionName,
 		RegionCode: city.RegionCode,
-		MetroCode:  city.MetroCode,
 		PostalCode: city.PostalCode,
 		City:       city.Name,
 		Latitude:   city.Latitude,
