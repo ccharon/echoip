@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 )
@@ -48,9 +49,15 @@ func logRefused(r *http.Request, e *AppError) {
 	log.Printf("%s %s %q -> %d: %q", r.RemoteAddr, r.Method, clip(r.URL.RequestURI()), e.Code, clip(e.Error()))
 }
 
-// maxValueLen bounds a value a caller controls, so one request cannot fill the
-// log with a single line.
-const maxValueLen = 128
+const (
+	// maxValueLen bounds a value a caller controls, so one request cannot fill
+	// the log with a single line or have its input echoed back at length.
+	maxValueLen = 128
+
+	// maxResizeBody is wider than the longest int64 and narrower than anything
+	// worth reading into memory.
+	maxResizeBody = 32
+)
 
 func clip(s string) string {
 	if len(s) <= maxValueLen {
@@ -67,9 +74,10 @@ func wrapHandlerFunc(f http.HandlerFunc) appHandler {
 }
 
 // requestError reports a request that could not be read, as JSON so that CLI
-// clients get a parsable answer.
+// clients get a parsable answer. The message is bounded, because an error may
+// quote what the caller sent.
 func requestError(err error) *AppError {
-	return badRequest(err).WithMessage(err.Error()).AsJSON()
+	return badRequest(err).WithMessage(clip(err.Error())).AsJSON()
 }
 
 // writeRaw writes without a trailing newline. A failed write means the client
@@ -141,8 +149,10 @@ func (s *Server) cacheHandler(w http.ResponseWriter, _ *http.Request) *AppError 
 }
 
 func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *AppError {
+	// The body holds one number, so reading further would only let a caller
+	// decide how much is held in memory.
 	var capacity int
-	if _, err := fmt.Fscan(r.Body, &capacity); err != nil {
+	if _, err := fmt.Fscan(io.LimitReader(r.Body, maxResizeBody), &capacity); err != nil {
 		return requestError(err)
 	}
 
