@@ -139,8 +139,7 @@ downloads per day, so a finer interval buys nothing and a coarser one such as
 `48` costs little.
 
 `-u 0` leaves the database files to whoever put them there, which is what
-`make geoip-download` or a volume filled from outside does. The browser page is built into the binary, so there is nothing to
-point at a template directory.
+`make geoip-download` or a volume filled from outside does.
 
 `-T` takes CIDR notation or a single address. A network with host bits set is
 refused rather than widened, so `-T 10.1.2.3/8` exits and names `10.0.0.0/8`.

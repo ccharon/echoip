@@ -20,7 +20,7 @@ func TestCacheCapacity(t *testing.T) {
 	for i, tt := range tests {
 		c := NewCache(tt.capacity)
 		var responses []Response
-		for i := 0; i < tt.addCount; i++ {
+		for i := range tt.addCount {
 			ip := netip.MustParseAddr(fmt.Sprintf("192.0.2.%d", i))
 			r := Response{IP: ip}
 			responses = append(responses, r)
