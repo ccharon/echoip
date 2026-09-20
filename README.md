@@ -124,7 +124,7 @@ $ curl echoip.example.com/json
 | `-H` | string, repeatable | none | Header to trust for the remote IP, e.g. `X-Real-IP` |
 | `-T` | string, repeatable | any peer | Networks whose requests may set the headers from `-H`, e.g. `10.0.0.0/8` or a single address |
 | `-r` | bool | `false` | Perform reverse hostname lookups |
-| `-C` | int | `0` | Size of the response cache. `0` disables caching. |
+| `-C` | int | `0` | Number of responses to cache. The entry read longest ago is dropped when it is full. `0` disables caching. |
 | `-P` | bool | `false` | Register the pprof and cache handlers below `/debug` |
 
 `-V` prints the version and exits. The image sets `-c`, `-a`, `-r`, `-C 1000`
