@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
-	stdhttp "net/http"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -24,7 +24,7 @@ func TestListenAndServeShutsDown(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err != nil && !errors.Is(err, stdhttp.ErrServerClosed) {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			t.Errorf("unexpected error: %v", err)
 		}
 	case <-time.After(5 * time.Second):
