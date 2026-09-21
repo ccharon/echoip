@@ -497,3 +497,51 @@ func TestPageNamesTheDatabaseBuilds(t *testing.T) {
 		t.Errorf("Expected %q, got %q", want, got)
 	}
 }
+
+func TestClipBoundary(t *testing.T) {
+	exact := strings.Repeat("a", maxValueLen)
+	if got := clip(exact); got != exact {
+		t.Errorf("a value of exactly %d characters was clipped: %q", maxValueLen, got)
+	}
+
+	over := exact + "b"
+	if want := exact + "..."; clip(over) != want {
+		t.Errorf("Expected %q, got %q", want, clip(over))
+	}
+}
+
+func TestErrorContentType(t *testing.T) {
+	log.SetOutput(io.Discard)
+	s := httptest.NewServer(testServer().Handler())
+	defer s.Close()
+
+	// A CLI client asks for an address it may not have, and gets JSON it can
+	// parse.
+	res, err := http.Get(s.URL + "/ip?ip=10.0.0.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if got := res.Header.Get("Content-Type"); got != jsonMediaType {
+		t.Errorf("Expected %q for a refused request, got %q", jsonMediaType, got)
+	}
+
+	// The browser page answers in plain text, so its error carries no JSON
+	// content type.
+	req, err := http.NewRequest(http.MethodGet, s.URL+"?ip=10.0.0.5", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if got := res.Header.Get("Content-Type"); strings.Contains(got, jsonMediaType) {
+		t.Errorf("Expected a plain error for the browser, got %q", got)
+	}
+	if got := res.Header.Get("Content-Type"); got == "" {
+		t.Error("Expected the browser error to carry a content type")
+	}
+}

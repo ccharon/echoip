@@ -48,10 +48,19 @@ func TestContentSecurityPolicyCoversPage(t *testing.T) {
 	if len(blocks) == 0 {
 		t.Fatal("expected the page to hold inline blocks")
 	}
+	// The hash has to sit in the directive that governs its element. A hash
+	// under the wrong one leaves both blocked.
+	directives := map[string]string{}
+	for _, part := range strings.Split(policy, "; ") {
+		name, sources, _ := strings.Cut(part, " ")
+		directives[name] = sources
+	}
+
 	for _, block := range blocks {
 		source := "'sha256-" + hashOf(block[2]) + "'"
-		if !strings.Contains(policy, source) {
-			t.Errorf("inline %s is not allowed by the policy", block[1])
+		directive := block[1] + "-src"
+		if !strings.Contains(directives[directive], source) {
+			t.Errorf("inline %s is not allowed by %s: %s", block[1], directive, directives[directive])
 		}
 	}
 }
