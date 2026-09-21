@@ -8,6 +8,7 @@
 
 ### Changed
 
+- CI pins every action to a commit.
 - The `http` package is `server`.
 
 ## 2.0.2 - 2026-09-21
