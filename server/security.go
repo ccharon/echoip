@@ -54,8 +54,10 @@ type inlineContent struct {
 
 func inlineBlocks() []inlineContent {
 	var page bytes.Buffer
+	// A page that cannot be rendered would leave the policy without hashes,
+	// which serves a page the browser refuses to run.
 	if err := pageTemplate.ExecuteTemplate(&page, indexTemplate, &pageData{}); err != nil {
-		return nil
+		panic("rendering the page for the content security policy: " + err.Error())
 	}
 
 	var blocks []inlineContent

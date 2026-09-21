@@ -10,6 +10,7 @@
 
 - CI pins every action to a commit.
 - The `http` package is `server`.
+- A broken page template stops the server at startup, instead of serving a page whose script and style the browser refuses to run.
 
 ### Fixed
 
