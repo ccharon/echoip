@@ -26,6 +26,8 @@ const (
 	jsonMediaType = "application/json"
 	textMediaType = "text/plain"
 
+	htmlContentType = "text/html; charset=utf-8"
+
 	// The template rendered for browsers. The other files beside it are
 	// included from it.
 	indexTemplate = "index.html"
