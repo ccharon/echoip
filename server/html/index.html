@@ -63,11 +63,13 @@
                 <p>Pick an endpoint to build the request and preview its answer.</p>
 
                 <div class="endpoints" id="endpoints" role="group" aria-label="Endpoint">
-                    <button type="button" class="chip" data-path="" aria-pressed="true">ip</button>
-                    <button type="button" class="chip" data-path="country" aria-pressed="false">country</button>
-                    <button type="button" class="chip" data-path="country-iso" aria-pressed="false">country-iso</button>
-                    <button type="button" class="chip" data-path="city" aria-pressed="false">city</button>
-                    <button type="button" class="chip" data-path="asn" aria-pressed="false">asn</button>
+                    <button type="button" class="chip" data-path="" data-value="{{ .IP }}" aria-pressed="true">ip</button>
+                    <button type="button" class="chip" data-path="country" data-value="{{ .Country }}" aria-pressed="false">country</button>
+                    <button type="button" class="chip" data-path="country-iso" data-value="{{ .CountryISO }}" aria-pressed="false">country-iso</button>
+                    <button type="button" class="chip" data-path="city" data-value="{{ .City }}" aria-pressed="false">city</button>
+                    <button type="button" class="chip" data-path="coordinates" data-value="{{ .Coordinates }}" aria-pressed="false">coordinates</button>
+                    <button type="button" class="chip" data-path="asn" data-value="{{ .ASN }}" aria-pressed="false">asn</button>
+                    <button type="button" class="chip" data-path="asn-org" data-value="{{ .ASNOrg }}" aria-pressed="false">asn-org</button>
                     <button type="button" class="chip" data-path="json" aria-pressed="false">json</button>
                 </div>
 
