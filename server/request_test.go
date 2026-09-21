@@ -27,6 +27,10 @@ func TestIPFromRequest(t *testing.T) {
 		{"127.0.0.1:9999?ip=1.2.3.4", "", "", nil, "1.2.3.4"},                                                       // passed in "ip" parameter
 		{"127.0.0.1:9999?ip=::ffff:1.2.3.4", "", "", nil, "1.2.3.4"},                                                // IPv4 inside IPv6 is unmapped
 		{"127.0.0.1:9999?ip=1.2.3.4", "X-Forwarded-For", "1.3.3.7,4.2.4.2", []string{"X-Forwarded-For"}, "1.2.3.4"}, // ip parameter wins over X-Forwarded-For with multiple entries
+		{"127.0.0.1:9999?ip=1.2.3.4:53", "", "", nil, "1.2.3.4"},                                                    // port is dropped from the ip parameter
+		{"127.0.0.1:9999", "X-Real-IP", "1.2.3.4:53", []string{"X-Real-IP"}, "1.2.3.4"},                             // port is dropped from a trusted header
+		{"127.0.0.1:9999", "X-Real-IP", "[2606:4700:4700::1111]:53", []string{"X-Real-IP"}, "2606:4700:4700::1111"}, // bracketed IPv6 with a port
+		{"127.0.0.1:9999", "X-Real-IP", "2606:4700:4700::1111", []string{"X-Real-IP"}, "2606:4700:4700::1111"},      // a bare IPv6 address keeps its last group
 	}
 	for _, tt := range tests {
 		u, err := url.Parse("http://" + tt.remoteAddr)
@@ -61,6 +65,8 @@ func TestIPFromRequestRefusesSuppliedPrivate(t *testing.T) {
 		{"ip parameter, loopback", "?ip=127.0.0.1", ""},
 		{"trusted header", "", "192.168.1.5"},
 		{"trusted header, first entry", "", "172.16.0.1, 1.3.3.7"},
+		{"ip parameter with a port", "?ip=10.0.0.5:53", ""},
+		{"trusted header with a port", "", "192.168.1.5:53"},
 	}
 
 	for _, tt := range tests {

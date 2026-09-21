@@ -117,14 +117,18 @@ func suppliedAddr(v string) (netip.Addr, error) {
 	return addr, nil
 }
 
-// parseAddr names the value it rejected, bounded, because no address is longer
-// than an IPv6 one and the caller chose what to send.
+// parseAddr reads an address with or without a port, because a proxy may put
+// the port into the header it sets. The bare form is tried first, so an
+// unbracketed IPv6 address does not lose its last group to a supposed port.
+// The rejected value is named, bounded, because the caller chose what to send.
 func parseAddr(s string) (netip.Addr, error) {
-	addr, err := netip.ParseAddr(s)
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("could not parse IP: %s", clip(s))
+	if addr, err := netip.ParseAddr(s); err == nil {
+		return addr.Unmap(), nil
 	}
-	return addr.Unmap(), nil
+	if addrPort, err := netip.ParseAddrPort(s); err == nil {
+		return addrPort.Addr().Unmap(), nil
+	}
+	return netip.Addr{}, fmt.Errorf("could not parse IP: %s", clip(s))
 }
 
 func firstForwardedFor(v string) string {

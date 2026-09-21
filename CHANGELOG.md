@@ -10,6 +10,7 @@
 ### Changed
 
 - CI pins every action to a commit.
+- An address in `?ip=` or a trusted header may carry a port, which is dropped. It used to be answered with 400.
 - The `http` package is `server`.
 - A broken page template stops the server at startup, instead of serving a page whose script and style the browser refuses to run.
 
