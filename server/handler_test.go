@@ -118,6 +118,7 @@ func TestCLIHandlers(t *testing.T) {
 		{s.URL + "/city", "Bornyasherk\n", 200, "", ""},
 		{s.URL + "/foo", "404 page not found", 404, "", ""},
 		{s.URL + "/asn", "AS59795\n", 200, "", ""},
+		{s.URL + "/asn-org", "Hosting4Real\n", 200, "", ""},
 	}
 
 	for _, tt := range tests {
@@ -343,6 +344,7 @@ func TestDisabledHandlers(t *testing.T) {
 		{s.URL + "/city", "404 page not found", 404},
 		{s.URL + "/coordinates", "404 page not found", 404},
 		{s.URL + "/asn", "404 page not found", 404},
+		{s.URL + "/asn-org", "404 page not found", 404},
 		{s.URL + "/json", "{\n  \"ip\": \"127.0.0.1\",\n  \"ip_decimal\": 2130706433\n}", 200},
 	}
 

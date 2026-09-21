@@ -95,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	r.Route("GET", "/city", s.cliField(func(r Response) string { return r.City })).MatcherFunc(s.hasCity)
 	r.Route("GET", "/coordinates", s.cliField(Response.Coordinates)).MatcherFunc(s.hasCity)
 	r.Route("GET", "/asn", s.cliField(func(r Response) string { return r.ASN })).MatcherFunc(s.hasASN)
+	r.Route("GET", "/asn-org", s.cliField(func(r Response) string { return r.ASNOrg })).MatcherFunc(s.hasASN)
 
 	r.Route("GET", "/", s.browserHandler)
 

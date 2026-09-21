@@ -5,6 +5,7 @@
 ### Added
 
 - The page footer names when MaxMind built each database.
+- `/asn-org` answers with the AS organization.
 
 ### Changed
 
