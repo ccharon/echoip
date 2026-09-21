@@ -18,6 +18,10 @@
 
 - A database that downloaded is put to use even when the other one failed in the same check. It used to wait on disk until a check brought both, up to 15 minutes.
 
+### Documentation
+
+- The default branch is `main`.
+
 ## 2.0.2 - 2026-09-21
 
 ### Breaking
