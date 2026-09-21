@@ -92,7 +92,7 @@ in [nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/master/nginx.co
 | `/json` | every field, also served on `/` for `Accept: application/json` |
 | `/country`, `/country-iso` | country name, ISO code |
 | `/city`, `/coordinates` | city, latitude and longitude |
-| `/asn` | AS number |
+| `/asn`, `/asn-org` | AS number, AS organization |
 | `/health` | `{"status":"OK"}` |
 
 ```
