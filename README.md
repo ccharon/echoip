@@ -16,7 +16,7 @@ unfortunately version 2.0 had a rough start, there are breaking changes in
 to remove some cli parameters. Also the automatic db download requires
 MAXMIND_ACCOUNT_ID and GEOIP_LICENSE_KEY env vars. Details see below.
 
-![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/screenshot.png)
+![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/main/screenshot.png)
 
 ## Run
 
@@ -81,7 +81,7 @@ networks:
 
 The service speaks plain HTTP and belongs behind a proxy that terminates TLS,
 sets the trusted header and limits the request rate. A working configuration is
-in [nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/master/nginx.conf).
+in [nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/main/nginx.conf).
 
 ## Endpoints
 
@@ -205,12 +205,12 @@ git push origin v2.0.2
 ```
 
 CI builds the image for the tag and publishes it as `2.0.2`, `2.0` and
-`sha-<commit>`. A push to `master` publishes `latest`. Tag the commit on
-`master`, because that is what the image is built from.
+`sha-<commit>`. A push to `main` publishes `latest`. Tag the commit on `main`,
+because that is what the image is built from.
 
 ## License
 
-BSD 3-Clause, see [LICENSE](https://raw.githubusercontent.com/ccharon/echoip/master/LICENSE). Copyright is held by Martin Polden for the
+BSD 3-Clause, see [LICENSE](https://raw.githubusercontent.com/ccharon/echoip/main/LICENSE). Copyright is held by Martin Polden for the
 original work and by Christian Charon for the changes in this fork.
 
 This product includes GeoLite2 data created by MaxMind, available from
