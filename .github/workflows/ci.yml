@@ -2,12 +2,12 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     # A version tag builds the image again, this time labelled with the
     # version. Without this the semver tags below are never produced.
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 env:
   DOCKER_IMAGE: ccharon/echoip
@@ -60,7 +60,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login to Docker Hub
-        if: github.event_name == 'push'
+        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -79,8 +79,9 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha
 
-      # A pull request builds for both platforms but publishes nothing. The
-      # build itself needs no emulation, the Dockerfile cross compiles.
+      # Only main and a version tag publish. A pull request and develop are
+      # built for both platforms and thrown away. The build itself needs no
+      # emulation, the Dockerfile cross compiles.
       - name: Build and push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -88,7 +89,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
-          push: ${{ github.event_name == 'push' }}
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

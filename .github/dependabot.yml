@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Pull requests go to develop, which is merged into main in one step. The
+  # limit is above the default of 5, so a batch of action updates does not
+  # queue up.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  # The Dockerfile is left out. Its Go version has to move together with the
+  # one in go.mod, which CI checks, and a lone bump would fail that check.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
