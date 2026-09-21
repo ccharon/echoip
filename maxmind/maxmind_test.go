@@ -883,3 +883,55 @@ func TestRequestUsesBasicAuth(t *testing.T) {
 		t.Errorf("credentials leak into the URL: %s", req.URL)
 	}
 }
+
+func TestRefreshLoadsWhatWasDownloadedBeforeAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		edition := requestedEdition(r)
+		if edition == EditionCity {
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		data := editionArchive(t, edition)
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	dir := t.TempDir()
+	asnPath := filepath.Join(dir, "GeoLite2-ASN.mmdb")
+	u := &Updater{
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases: map[string]string{
+			EditionASN:  asnPath,
+			EditionCity: filepath.Join(dir, "GeoLite2-City.mmdb"),
+		},
+	}
+
+	// The editions are downloaded in sorted order, so ASN is in place when
+	// City fails.
+	reloads := 0
+	delay := u.refresh(t.Context(), func() error {
+		reloads++
+		return nil
+	})
+
+	if reloads != 1 {
+		t.Errorf("expected the ASN database to be loaded, got %d reloads", reloads)
+	}
+	if _, err := os.Stat(asnPath); err != nil {
+		t.Errorf("expected the ASN database on disk: %v", err)
+	}
+	if want := u.retryDelay(); delay != want {
+		t.Errorf("expected a retry after %s, got %s", want, delay)
+	}
+}

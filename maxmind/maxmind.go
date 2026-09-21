@@ -149,20 +149,24 @@ func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 
 // refresh runs one check and returns how long to wait for the next one.
 func (u *Updater) refresh(ctx context.Context, onUpdate func() error) time.Duration {
-	changed, err := u.Update(ctx)
-	if err != nil {
-		log.Printf("GeoIP update failed: %v", err)
-		return u.retryDelay()
-	}
-	if !changed {
-		return u.nextRefresh()
+	changed, updateErr := u.Update(ctx)
+	if updateErr != nil {
+		log.Printf("GeoIP update failed: %v", updateErr)
 	}
 
-	if err := onUpdate(); err != nil {
-		log.Printf("Reloading GeoIP databases failed: %v", err)
+	// An edition that was replaced before a later one failed is loaded all the
+	// same, so it does not wait on disk until a check succeeds as a whole.
+	if changed {
+		if err := onUpdate(); err != nil {
+			log.Printf("Reloading GeoIP databases failed: %v", err)
+			return u.retryDelay()
+		}
+		log.Print("GeoIP databases updated")
+	}
+
+	if updateErr != nil {
 		return u.retryDelay()
 	}
-	log.Print("GeoIP databases updated")
 
 	return u.nextRefresh()
 }
