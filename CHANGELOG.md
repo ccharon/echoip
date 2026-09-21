@@ -22,6 +22,7 @@
 ### Documentation
 
 - The default branch is `main`.
+- The request header limit is stated as the 12 KiB a request is refused at. `net/http` reads 4 KiB beyond `MaxHeaderBytes` for its buffer.
 
 ## 2.0.2 - 2026-09-21
 
