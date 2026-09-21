@@ -119,6 +119,14 @@ func TestReloadAfterMissingDatabase(t *testing.T) {
 	if record.CountryISO == "" {
 		t.Error("expected a country after the database loaded")
 	}
+
+	asnRecord, err := d.ASN(netip.MustParseAddr("8.8.8.8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asnRecord.AutonomousSystemNumber == 0 || asnRecord.AutonomousSystemOrganization == "" {
+		t.Errorf("expected an AS number and organization, got %+v", asnRecord)
+	}
 }
 
 func TestReloadKeepsDatabasesOnError(t *testing.T) {

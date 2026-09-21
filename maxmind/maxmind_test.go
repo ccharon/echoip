@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -931,6 +932,33 @@ func TestRefreshLoadsWhatWasDownloadedBeforeAnError(t *testing.T) {
 	if _, err := os.Stat(asnPath); err != nil {
 		t.Errorf("expected the ASN database on disk: %v", err)
 	}
+	if want := u.retryDelay(); delay != want {
+		t.Errorf("expected a retry after %s, got %s", want, delay)
+	}
+}
+
+func TestRefreshRetriesWhenReloadFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	u := &Updater{
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
+	}
+
+	// The download succeeds and the reload does not, so the next check comes
+	// sooner than a whole interval.
+	delay := u.refresh(t.Context(), func() error {
+		return errors.New("broken database")
+	})
+
 	if want := u.retryDelay(); delay != want {
 		t.Errorf("expected a retry after %s, got %s", want, delay)
 	}
