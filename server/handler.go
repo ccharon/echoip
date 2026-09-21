@@ -84,7 +84,7 @@ func requestError(err error) *AppError {
 // writeRaw writes without a trailing newline. A failed write means the client
 // is gone, which is only worth a log line.
 func writeRaw(w http.ResponseWriter, s string) {
-	if _, err := fmt.Fprint(w, s); err != nil {
+	if _, err := io.WriteString(w, s); err != nil {
 		log.Printf("Writing response failed: %v", err)
 	}
 }
@@ -195,7 +195,13 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 	if err := pageTemplate.ExecuteTemplate(&page, indexTemplate, &data); err != nil {
 		return internalServerError(err)
 	}
-	writeRaw(w, page.String())
+
+	// Set explicitly rather than left to content sniffing, which the nosniff
+	// header tells the browser to ignore.
+	w.Header().Set("Content-Type", htmlContentType)
+	if _, err := page.WriteTo(w); err != nil {
+		log.Printf("Writing response failed: %v", err)
+	}
 
 	return nil
 }
