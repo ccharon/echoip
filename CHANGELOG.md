@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- `iputil.Public` classifies an IPv4-mapped address like the address it carries. Eight special-purpose ranges slipped through in the mapped form.
 - A database that downloaded is put to use even when the other one failed in the same check. It used to wait on disk until a check brought both, up to 15 minutes.
 
 ### Documentation

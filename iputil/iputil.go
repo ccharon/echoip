@@ -50,6 +50,11 @@ func Public(addr netip.Addr) bool {
 	if !addr.IsValid() || addr.Zone() != "" {
 		return false
 	}
+
+	// netip.Prefix.Contains treats a mapped address as IPv6, so the IPv4
+	// prefixes below would never match it.
+	addr = addr.Unmap()
+
 	if addr.IsUnspecified() || addr.IsLoopback() || addr.IsPrivate() ||
 		addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
 		addr.IsInterfaceLocalMulticast() || addr.IsMulticast() {
