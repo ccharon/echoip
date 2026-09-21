@@ -963,3 +963,38 @@ func TestRefreshRetriesWhenReloadFails(t *testing.T) {
 		t.Errorf("expected a retry after %s, got %s", want, delay)
 	}
 }
+
+func TestRefreshRetriesSoonerAfterAFailedCheck(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	// The database is present and current, so the age alone would put the next
+	// check a whole interval away. The failed request has to pull it closer.
+	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
+	if err := os.WriteFile(path, []byte("current"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	u := &Updater{
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+
+	delay := u.refresh(t.Context(), func() error {
+		t.Error("expected no reload after a failed download")
+		return nil
+	})
+
+	if want := u.retryDelay(); delay != want {
+		t.Errorf("expected a retry after %s, got %s", want, delay)
+	}
+}
