@@ -2,6 +2,10 @@
 
 ## 2.0.3 - Unreleased
 
+### Changed
+
+- The `http` package is `server`.
+
 ## 2.0.2 - 2026-09-21
 
 ### Breaking
