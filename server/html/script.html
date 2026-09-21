@@ -11,6 +11,7 @@
         const ipField = document.getElementById("ip");
 
         let path = "";
+        let value = response.ip;
 
         // The page was rendered for a supplied address, so the request line has
         // to carry it. response.ip is the parsed form the server reports.
@@ -38,20 +39,15 @@
             if (address && address !== response.ip) {
                 return "Open the request to see the answer for another address.";
             }
-            switch (path) {
-                case "":
-                    return response.ip;
-                case "json":
-                    return JSON.stringify(response, null, 2);
-                default: {
-                    const value = response[path.replace("-", "_")];
-                    return value === undefined || value === "" ? "(not available for this address)" : String(value);
-                }
+            if (path === "json") {
+                return JSON.stringify(response, null, 2);
             }
+            return value || "(not available for this address)";
         }
 
         function selectEndpoint(button) {
             path = button.dataset.path;
+            value = button.dataset.value;
             for (const chip of endpoints.querySelectorAll(".chip")) {
                 chip.setAttribute("aria-pressed", String(chip === button));
             }
