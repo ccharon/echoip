@@ -5,17 +5,21 @@ import (
 	"errors"
 	"net/netip"
 	"sync"
+	"time"
 
 	"github.com/oschwald/geoip2-golang/v2"
 )
 
 // Reader looks up GeoIP records. The Has methods report which lookups the
-// databases currently loaded can answer.
+// databases currently loaded can answer, the Built methods when MaxMind built
+// them.
 type Reader interface {
 	City(netip.Addr) (City, error)
 	ASN(netip.Addr) (ASN, error)
 	HasCity() bool
 	HasASN() bool
+	CityBuilt() time.Time
+	ASNBuilt() time.Time
 }
 
 type City struct {
@@ -181,4 +185,27 @@ func (d *Database) HasASN() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.asn != nil
+}
+
+// CityBuilt returns when MaxMind built the city database, the zero time while
+// none is loaded.
+func (d *Database) CityBuilt() time.Time {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return buildTime(d.city)
+}
+
+// ASNBuilt returns when MaxMind built the ASN database, the zero time while
+// none is loaded.
+func (d *Database) ASNBuilt() time.Time {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return buildTime(d.asn)
+}
+
+func buildTime(r *geoip2.Reader) time.Time {
+	if r == nil {
+		return time.Time{}
+	}
+	return r.Metadata().BuildTime()
 }

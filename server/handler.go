@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 )
 
 // appHandler returns its error for ServeHTTP to render, so every handler
@@ -179,6 +181,7 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 	data := pageData{
 		Response:     response,
 		Host:         r.Host,
+		GeoBuilt:     s.geoBuilt(),
 		BoxLatTop:    response.Latitude + boxMargin,
 		BoxLatBottom: response.Latitude - boxMargin,
 		BoxLonLeft:   response.Longitude - boxMargin,
@@ -205,11 +208,31 @@ const boxMargin = 0.05
 type pageData struct {
 	Response
 	Host         string
+	GeoBuilt     string
 	BoxLatTop    float64
 	BoxLatBottom float64
 	BoxLonLeft   float64
 	BoxLonRight  float64
 	JSON         string
+}
+
+// geoBuilt names when MaxMind built the databases that are loaded, for the
+// attribution in the page footer. It is read per request, because a database
+// may be replaced while the server runs.
+func (s *Server) geoBuilt() string {
+	var parts []string
+	if built := s.geo.CityBuilt(); !built.IsZero() {
+		parts = append(parts, "City database built "+buildDate(built))
+	}
+	if built := s.geo.ASNBuilt(); !built.IsZero() {
+		parts = append(parts, "ASN database built "+buildDate(built))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// buildDate states the build in UTC, the zone MaxMind stamps it in.
+func buildDate(built time.Time) string {
+	return built.UTC().Format(time.DateOnly)
 }
 
 func notFoundHandler(_ http.ResponseWriter, r *http.Request) *AppError {

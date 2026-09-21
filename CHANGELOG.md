@@ -2,6 +2,10 @@
 
 ## 2.0.3 - Unreleased
 
+### Added
+
+- The page footer names when MaxMind built each database.
+
 ### Changed
 
 - The `http` package is `server`.

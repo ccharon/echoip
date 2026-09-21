@@ -87,7 +87,7 @@
     </main>
 
     {{ if or .Country .City .ASN .ASNOrg }}
-    <footer class="footer">This product includes GeoLite2 data created by <a href="https://www.maxmind.com" rel="noreferrer">MaxMind</a>, available from <a href="https://www.maxmind.com" rel="noreferrer">maxmind.com</a>.</footer>
+    <footer class="footer">This product includes GeoLite2 data created by <a href="https://www.maxmind.com" rel="noreferrer">MaxMind</a>, available from <a href="https://www.maxmind.com" rel="noreferrer">maxmind.com</a>.{{ with .GeoBuilt }} {{ . }}.{{ end }}</footer>
     {{ end }}
 </div>
 

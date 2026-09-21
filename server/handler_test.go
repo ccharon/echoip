@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ccharon/echoip/iputil/geo"
 )
@@ -27,6 +28,9 @@ func (t *testDb) ASN(netip.Addr) (geo.ASN, error) {
 
 func (t *testDb) HasCity() bool { return true }
 func (t *testDb) HasASN() bool  { return true }
+
+func (t *testDb) CityBuilt() time.Time { return time.Date(2026, 9, 18, 4, 49, 38, 0, time.UTC) }
+func (t *testDb) ASNBuilt() time.Time  { return time.Date(2026, 9, 19, 8, 15, 24, 0, time.UTC) }
 
 // pendingDb stands in for databases that are downloaded after the server
 // started.
@@ -460,5 +464,34 @@ func TestGeoHandlersFollowDatabase(t *testing.T) {
 	}
 	if want := "Elbonia\n"; out != want {
 		t.Errorf("Expected %q, got %q", want, out)
+	}
+}
+
+// absentCityDb stands in for a server that holds only the ASN database.
+type absentCityDb struct{ testDb }
+
+func (t *absentCityDb) CityBuilt() time.Time { return time.Time{} }
+
+func TestPageNamesTheDatabaseBuilds(t *testing.T) {
+	server := testServer()
+	s := httptest.NewServer(server.Handler())
+	defer s.Close()
+
+	out, status, err := httpGet(s.URL, "", "Mozilla/5.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 200 {
+		t.Fatalf("Expected 200, got %d", status)
+	}
+	if want := "City database built 2026-09-18, ASN database built 2026-09-19."; !strings.Contains(out, want) {
+		t.Errorf("Expected the footer to name %q", want)
+	}
+
+	// A database that is not loaded is left out rather than dated to the zero
+	// time.
+	server.geo = &absentCityDb{}
+	if got, want := server.geoBuilt(), "ASN database built 2026-09-19"; got != want {
+		t.Errorf("Expected %q, got %q", want, got)
 	}
 }
