@@ -49,3 +49,35 @@ func TestBrowserPage(t *testing.T) {
 		t.Errorf("expected the browser page, got %q", out)
 	}
 }
+
+// The limit is maxHeaderBytes plus the 4 KiB net/http reads for its buffer, so
+// a request is refused above 12 KiB rather than above 8.
+func TestHeaderLimit(t *testing.T) {
+	srv := New(Config{}, &testDb{}, NewCache(0))
+	s := httptest.NewUnstartedServer(srv.Handler())
+	s.Config.MaxHeaderBytes = maxHeaderBytes
+	s.Start()
+	defer s.Close()
+
+	status := func(size int) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, s.URL+"/ip", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Filler", strings.Repeat("a", size))
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+
+	if got := status(maxHeaderBytes); got != 200 {
+		t.Errorf("Expected a header of %d bytes to pass, got %d", maxHeaderBytes, got)
+	}
+	if got := status(maxHeaderBytes + 8<<10); got != http.StatusRequestHeaderFieldsTooLarge {
+		t.Errorf("Expected 431 for an oversized header, got %d", got)
+	}
+}
