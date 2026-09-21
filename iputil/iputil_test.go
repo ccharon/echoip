@@ -76,6 +76,13 @@ func TestPublic(t *testing.T) {
 		if got := Public(addr); got != tt.out {
 			t.Errorf("Public(%s) = %t, want %t", tt.in, got, tt.out)
 		}
+		// The mapped form is judged by the address it carries.
+		if addr.Is4() {
+			mapped := netip.AddrFrom16(addr.As16())
+			if got := Public(mapped); got != tt.out {
+				t.Errorf("Public(%s) = %t, want %t", mapped, got, tt.out)
+			}
+		}
 	}
 
 	if Public(netip.Addr{}) {
@@ -84,8 +91,7 @@ func TestPublic(t *testing.T) {
 	if Public(netip.MustParseAddr("2606:4700::1%eth0")) {
 		t.Error("an address with a zone is not public")
 	}
-	// An IPv4 address inside IPv6 is judged by the address it carries.
-	if Public(netip.MustParseAddr("::ffff:10.0.0.5").Unmap()) {
+	if Public(netip.MustParseAddr("::ffff:10.0.0.5")) {
 		t.Error("a mapped private address is not public")
 	}
 }
