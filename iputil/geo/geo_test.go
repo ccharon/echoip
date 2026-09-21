@@ -119,6 +119,14 @@ func TestReloadAfterMissingDatabase(t *testing.T) {
 	if record.CountryISO == "" {
 		t.Error("expected a country after the database loaded")
 	}
+
+	asnRecord, err := d.ASN(netip.MustParseAddr("8.8.8.8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asnRecord.AutonomousSystemNumber == 0 || asnRecord.AutonomousSystemOrganization == "" {
+		t.Errorf("expected an AS number and organization, got %+v", asnRecord)
+	}
 }
 
 func TestReloadKeepsDatabasesOnError(t *testing.T) {
@@ -192,5 +200,32 @@ func TestCityOutsideEU(t *testing.T) {
 	}
 	if *city.CountryIsEU {
 		t.Error("expected the United States to be outside the EU")
+	}
+}
+
+func TestBuildTimes(t *testing.T) {
+	city, asn := databases(t)
+	if city == "" {
+		t.Skip("GeoLite2 databases not present")
+	}
+
+	d, err := Open(city, asn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if d.CityBuilt().IsZero() {
+		t.Error("expected a build time for the city database")
+	}
+	if d.ASNBuilt().IsZero() {
+		t.Error("expected a build time for the ASN database")
+	}
+
+	empty, err := Open("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !empty.CityBuilt().IsZero() || !empty.ASNBuilt().IsZero() {
+		t.Error("expected no build time without a database")
 	}
 }

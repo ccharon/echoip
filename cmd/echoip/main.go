@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	stdhttp "net/http"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -15,10 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ccharon/echoip/http"
 	"github.com/ccharon/echoip/iputil"
 	"github.com/ccharon/echoip/iputil/geo"
 	"github.com/ccharon/echoip/maxmind"
+	"github.com/ccharon/echoip/server"
 )
 
 // version is set at build time from the git tag.
@@ -181,8 +181,8 @@ func main() {
 		log.Printf("GeoIP lookups are limited: %v", err)
 	}
 
-	cache := http.NewCache(opts.cacheSize)
-	server := http.New(serverConfig(opts), geoReader, cache)
+	cache := server.NewCache(opts.cacheSize)
+	srv := server.New(serverConfig(opts), geoReader, cache)
 
 	if updater.Enabled() {
 		log.Printf("Checking GeoIP databases every %s", updater.Interval)
@@ -197,7 +197,7 @@ func main() {
 	}
 
 	log.Printf("Listening on http://%s", opts.listen)
-	if err := server.ListenAndServe(ctx, opts.listen); err != nil && !errors.Is(err, stdhttp.ErrServerClosed) {
+	if err := srv.ListenAndServe(ctx, opts.listen); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 	log.Print("Shutdown complete")
@@ -229,8 +229,8 @@ func missingCredential(u *maxmind.Updater) string {
 
 // serverConfig turns the flags into the server configuration and reports what
 // it enabled.
-func serverConfig(opts *options) http.Config {
-	cfg := http.Config{
+func serverConfig(opts *options) server.Config {
+	cfg := server.Config{
 		IPHeaders:      opts.headers,
 		TrustedProxies: opts.trustedProxies,
 		Profile:        opts.profile,

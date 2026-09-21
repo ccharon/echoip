@@ -16,7 +16,7 @@ unfortunately version 2.0 had a rough start, there are breaking changes in
 to remove some cli parameters. Also the automatic db download requires
 MAXMIND_ACCOUNT_ID and GEOIP_LICENSE_KEY env vars. Details see below.
 
-![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/master/screenshot.png)
+![Screenshot](https://raw.githubusercontent.com/ccharon/echoip/main/screenshot.png)
 
 ## Run
 
@@ -81,7 +81,7 @@ networks:
 
 The service speaks plain HTTP and belongs behind a proxy that terminates TLS,
 sets the trusted header and limits the request rate. A working configuration is
-in [nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/master/nginx.conf).
+in [nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/main/nginx.conf).
 
 ## Endpoints
 
@@ -92,7 +92,7 @@ in [nginx.conf](https://raw.githubusercontent.com/ccharon/echoip/master/nginx.co
 | `/json` | every field, also served on `/` for `Accept: application/json` |
 | `/country`, `/country-iso` | country name, ISO code |
 | `/city`, `/coordinates` | city, latitude and longitude |
-| `/asn` | AS number |
+| `/asn`, `/asn-org` | AS number, AS organization |
 | `/health` | `{"status":"OK"}` |
 
 ```
@@ -160,7 +160,7 @@ The service answers unauthenticated requests from anyone.
 | Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`. |
 | Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`. |
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it. |
-| Requests are bounded | Headers are capped at 8 KiB, the body of `/debug/cache/resize` at 32 bytes, and an error quotes at most 128 characters of what the caller sent. |
+| Requests are bounded | Headers are refused at 12 KiB, the body of `/debug/cache/resize` at 32 bytes, and an error quotes at most 128 characters of what the caller sent. |
 | The container runs as an unprivileged user | UID 65532, with a read-only root filesystem, no capabilities and `no-new-privileges`. |
 | The credentials never reach a log | They are read from the environment and sent in an `Authorization` header, and errors are stripped of the request URL. |
 | Refused requests are logged | Every 4xx and 5xx is written with the peer address, the method, the target and the reason, quoted and cut at 128 characters. |
@@ -205,12 +205,12 @@ git push origin v2.0.2
 ```
 
 CI builds the image for the tag and publishes it as `2.0.2`, `2.0` and
-`sha-<commit>`. A push to `master` publishes `latest`. Tag the commit on
-`master`, because that is what the image is built from.
+`sha-<commit>`. A push to `main` publishes `latest`. Tag the commit on `main`,
+because that is what the image is built from.
 
 ## License
 
-BSD 3-Clause, see [LICENSE](https://raw.githubusercontent.com/ccharon/echoip/master/LICENSE). Copyright is held by Martin Polden for the
+BSD 3-Clause, see [LICENSE](https://raw.githubusercontent.com/ccharon/echoip/main/LICENSE). Copyright is held by Martin Polden for the
 original work and by Christian Charon for the changes in this fork.
 
 This product includes GeoLite2 data created by MaxMind, available from

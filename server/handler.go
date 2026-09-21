@@ -1,4 +1,4 @@
-package http
+package server
 
 import (
 	"bytes"
@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 )
 
 // appHandler returns its error for ServeHTTP to render, so every handler
@@ -82,7 +84,7 @@ func requestError(err error) *AppError {
 // writeRaw writes without a trailing newline. A failed write means the client
 // is gone, which is only worth a log line.
 func writeRaw(w http.ResponseWriter, s string) {
-	if _, err := fmt.Fprint(w, s); err != nil {
+	if _, err := io.WriteString(w, s); err != nil {
 		log.Printf("Writing response failed: %v", err)
 	}
 }
@@ -179,6 +181,7 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 	data := pageData{
 		Response:     response,
 		Host:         r.Host,
+		GeoBuilt:     s.geoBuilt(),
 		BoxLatTop:    response.Latitude + boxMargin,
 		BoxLatBottom: response.Latitude - boxMargin,
 		BoxLonLeft:   response.Longitude - boxMargin,
@@ -192,7 +195,13 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *AppErro
 	if err := pageTemplate.ExecuteTemplate(&page, indexTemplate, &data); err != nil {
 		return internalServerError(err)
 	}
-	writeRaw(w, page.String())
+
+	// Set explicitly rather than left to content sniffing, which the nosniff
+	// header tells the browser to ignore.
+	w.Header().Set("Content-Type", htmlContentType)
+	if _, err := page.WriteTo(w); err != nil {
+		log.Printf("Writing response failed: %v", err)
+	}
 
 	return nil
 }
@@ -205,11 +214,31 @@ const boxMargin = 0.05
 type pageData struct {
 	Response
 	Host         string
+	GeoBuilt     string
 	BoxLatTop    float64
 	BoxLatBottom float64
 	BoxLonLeft   float64
 	BoxLonRight  float64
 	JSON         string
+}
+
+// geoBuilt names when MaxMind built the databases that are loaded, for the
+// attribution in the page footer. It is read per request, because a database
+// may be replaced while the server runs.
+func (s *Server) geoBuilt() string {
+	var parts []string
+	if built := s.geo.CityBuilt(); !built.IsZero() {
+		parts = append(parts, "City database built "+buildDate(built))
+	}
+	if built := s.geo.ASNBuilt(); !built.IsZero() {
+		parts = append(parts, "ASN database built "+buildDate(built))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// buildDate states the build in UTC, the zone MaxMind stamps it in.
+func buildDate(built time.Time) string {
+	return built.UTC().Format(time.DateOnly)
 }
 
 func notFoundHandler(_ http.ResponseWriter, r *http.Request) *AppError {

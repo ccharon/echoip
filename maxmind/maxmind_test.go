@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -881,5 +882,119 @@ func TestRequestUsesBasicAuth(t *testing.T) {
 	}
 	if strings.Contains(req.URL.String(), "secret") || strings.Contains(req.URL.String(), "12345") {
 		t.Errorf("credentials leak into the URL: %s", req.URL)
+	}
+}
+
+func TestRefreshLoadsWhatWasDownloadedBeforeAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		edition := requestedEdition(r)
+		if edition == EditionCity {
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		data := editionArchive(t, edition)
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	dir := t.TempDir()
+	asnPath := filepath.Join(dir, "GeoLite2-ASN.mmdb")
+	u := &Updater{
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases: map[string]string{
+			EditionASN:  asnPath,
+			EditionCity: filepath.Join(dir, "GeoLite2-City.mmdb"),
+		},
+	}
+
+	// The editions are downloaded in sorted order, so ASN is in place when
+	// City fails.
+	reloads := 0
+	delay := u.refresh(t.Context(), func() error {
+		reloads++
+		return nil
+	})
+
+	if reloads != 1 {
+		t.Errorf("expected the ASN database to be loaded, got %d reloads", reloads)
+	}
+	if _, err := os.Stat(asnPath); err != nil {
+		t.Errorf("expected the ASN database on disk: %v", err)
+	}
+	if want := u.retryDelay(); delay != want {
+		t.Errorf("expected a retry after %s, got %s", want, delay)
+	}
+}
+
+func TestRefreshRetriesWhenReloadFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	u := &Updater{
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
+	}
+
+	// The download succeeds and the reload does not, so the next check comes
+	// sooner than a whole interval.
+	delay := u.refresh(t.Context(), func() error {
+		return errors.New("broken database")
+	})
+
+	if want := u.retryDelay(); delay != want {
+		t.Errorf("expected a retry after %s, got %s", want, delay)
+	}
+}
+
+func TestRefreshRetriesSoonerAfterAFailedCheck(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	defer swapDownloadURL(srv.URL)()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	// The database is present and current, so the age alone would put the next
+	// check a whole interval away. The failed request has to pull it closer.
+	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
+	if err := os.WriteFile(path, []byte("current"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	u := &Updater{
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+
+	delay := u.refresh(t.Context(), func() error {
+		t.Error("expected no reload after a failed download")
+		return nil
+	})
+
+	if want := u.retryDelay(); delay != want {
+		t.Errorf("expected a retry after %s, got %s", want, delay)
 	}
 }

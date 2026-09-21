@@ -1,4 +1,4 @@
-package http
+package server
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ccharon/echoip/iputil/geo"
 )
@@ -27,6 +28,9 @@ func (t *testDb) ASN(netip.Addr) (geo.ASN, error) {
 
 func (t *testDb) HasCity() bool { return true }
 func (t *testDb) HasASN() bool  { return true }
+
+func (t *testDb) CityBuilt() time.Time { return time.Date(2026, 9, 18, 4, 49, 38, 0, time.UTC) }
+func (t *testDb) ASNBuilt() time.Time  { return time.Date(2026, 9, 19, 8, 15, 24, 0, time.UTC) }
 
 // pendingDb stands in for databases that are downloaded after the server
 // started.
@@ -114,6 +118,7 @@ func TestCLIHandlers(t *testing.T) {
 		{s.URL + "/city", "Bornyasherk\n", 200, "", ""},
 		{s.URL + "/foo", "404 page not found", 404, "", ""},
 		{s.URL + "/asn", "AS59795\n", 200, "", ""},
+		{s.URL + "/asn-org", "Hosting4Real\n", 200, "", ""},
 	}
 
 	for _, tt := range tests {
@@ -339,6 +344,7 @@ func TestDisabledHandlers(t *testing.T) {
 		{s.URL + "/city", "404 page not found", 404},
 		{s.URL + "/coordinates", "404 page not found", 404},
 		{s.URL + "/asn", "404 page not found", 404},
+		{s.URL + "/asn-org", "404 page not found", 404},
 		{s.URL + "/json", "{\n  \"ip\": \"127.0.0.1\",\n  \"ip_decimal\": 2130706433\n}", 200},
 	}
 
@@ -460,5 +466,82 @@ func TestGeoHandlersFollowDatabase(t *testing.T) {
 	}
 	if want := "Elbonia\n"; out != want {
 		t.Errorf("Expected %q, got %q", want, out)
+	}
+}
+
+// absentCityDb stands in for a server that holds only the ASN database.
+type absentCityDb struct{ testDb }
+
+func (t *absentCityDb) CityBuilt() time.Time { return time.Time{} }
+
+func TestPageNamesTheDatabaseBuilds(t *testing.T) {
+	server := testServer()
+	s := httptest.NewServer(server.Handler())
+	defer s.Close()
+
+	out, status, err := httpGet(s.URL, "", "Mozilla/5.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 200 {
+		t.Fatalf("Expected 200, got %d", status)
+	}
+	if want := "City database built 2026-09-18, ASN database built 2026-09-19."; !strings.Contains(out, want) {
+		t.Errorf("Expected the footer to name %q", want)
+	}
+
+	// A database that is not loaded is left out rather than dated to the zero
+	// time.
+	server.geo = &absentCityDb{}
+	if got, want := server.geoBuilt(), "ASN database built 2026-09-19"; got != want {
+		t.Errorf("Expected %q, got %q", want, got)
+	}
+}
+
+func TestClipBoundary(t *testing.T) {
+	exact := strings.Repeat("a", maxValueLen)
+	if got := clip(exact); got != exact {
+		t.Errorf("a value of exactly %d characters was clipped: %q", maxValueLen, got)
+	}
+
+	over := exact + "b"
+	if want := exact + "..."; clip(over) != want {
+		t.Errorf("Expected %q, got %q", want, clip(over))
+	}
+}
+
+func TestErrorContentType(t *testing.T) {
+	log.SetOutput(io.Discard)
+	s := httptest.NewServer(testServer().Handler())
+	defer s.Close()
+
+	// A CLI client asks for an address it may not have, and gets JSON it can
+	// parse.
+	res, err := http.Get(s.URL + "/ip?ip=10.0.0.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if got := res.Header.Get("Content-Type"); got != jsonMediaType {
+		t.Errorf("Expected %q for a refused request, got %q", jsonMediaType, got)
+	}
+
+	// The browser page answers in plain text, so its error carries no JSON
+	// content type.
+	req, err := http.NewRequest(http.MethodGet, s.URL+"?ip=10.0.0.5", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if got := res.Header.Get("Content-Type"); strings.Contains(got, jsonMediaType) {
+		t.Errorf("Expected a plain error for the browser, got %q", got)
+	}
+	if got := res.Header.Get("Content-Type"); got == "" {
+		t.Error("Expected the browser error to carry a content type")
 	}
 }

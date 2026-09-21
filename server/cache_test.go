@@ -1,4 +1,4 @@
-package http
+package server
 
 import (
 	"fmt"
@@ -203,5 +203,25 @@ func TestCacheEvictsLeastRecentlyRead(t *testing.T) {
 	}
 	if got, want := c.evictions, uint64(1); got != want {
 		t.Errorf("evictions = %d, want %d", got, want)
+	}
+}
+
+// A capacity of zero is the documented way to switch the cache off, so it is
+// valid rather than refused.
+func TestCacheZeroCapacityIsValid(t *testing.T) {
+	c := NewCache(0)
+	if got := c.Stats().Capacity; got != 0 {
+		t.Errorf("Expected capacity 0, got %d", got)
+	}
+
+	c = NewCache(4)
+	if err := c.Resize(0); err != nil {
+		t.Errorf("Expected resizing to 0 to succeed: %v", err)
+	}
+	if got := c.Stats().Capacity; got != 0 {
+		t.Errorf("Expected capacity 0 after the resize, got %d", got)
+	}
+	if err := c.Resize(-1); err == nil {
+		t.Error("Expected a negative capacity to be refused")
 	}
 }

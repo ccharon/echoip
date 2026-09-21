@@ -1,30 +1,55 @@
 # Changelog
 
-## 2.0.2 - Unreleased
+## 2.0.3 - Unreleased
 
-### Breaking
+### Added
 
-- `metro_code` is gone from the response and the page. MaxMind deprecated the field with the note that metro codes are no longer maintained.
-- `-u` counts whole hours instead of taking a Go duration. `-u 24h` is now `-u 24`. MaxMind rebuilds GeoLite2 twice a week and limits downloads per day, so nothing below an hour is useful.
-- `MAXMIND_ACCOUNT_ID` is required beside `GEOIP_LICENSE_KEY`. Downloads use the current MaxMind endpoint, which authenticates with HTTP basic auth instead of a license key in the query string.
+- The page footer names when MaxMind built each database.
+- `/asn-org` answers with the AS organization.
 
 ### Changed
 
-- Request headers are capped at 8 KiB instead of the 1 MiB Go allows by default.
-- `POST /debug/cache/resize` reads at most 32 bytes, and an error message quotes at most 128 characters of the request. A megabyte of digits was read into memory and echoed back in full.
-- The response cache evicts the entry that was read longest ago instead of the one inserted first. A client that keeps asking stays cached however many one-time visitors pass through. A read takes the write lock now, which costs a map lookup and a pointer swap.
-- The MaxMind credentials are required only when a database is configured and `-u` is not `0`. A server that is handed its database files and never checks for new ones asks for neither.
-
-### Documentation
-
-- The nginx example is `nginx.conf` in the repository root rather than a fenced block in a Markdown page, so the link serves something a reader can save and nginx can read. Its prose moved into the comments it belongs to.
+- CI pins every action to a commit.
+- An address in `?ip=` or a trusted header may carry a port, which is dropped. It used to be answered with 400.
+- The `http` package is `server`.
+- A broken page template stops the server at startup, instead of serving a page whose script and style the browser refuses to run.
 
 ### Fixed
 
-- `/coordinates` answers with nothing when the address has no location. It formatted the zero value as `0.000000,0.000000`, a place in the Gulf of Guinea.
-- A failed GeoIP lookup is logged. An address the database does not hold returns no error, so a failure meant the file was unreadable, and the service answered without geo data and without a trace.
-- The browser page is rendered into a buffer before it is written. A template failure halfway through left a truncated page that the 500 could no longer take back.
-- `country_eu` follows the country of the address alone. The registered country says where the block is registered, not where it is used, so a block registered in the EU and used elsewhere reported `true`.
+- `iputil.Public` classifies an IPv4-mapped address like the address it carries. Eight special-purpose ranges slipped through in the mapped form.
+- A database that downloaded is put to use even when the other one failed in the same check. It used to wait on disk until a check brought both, up to 15 minutes.
+
+### Documentation
+
+- The default branch is `main`.
+- The request header limit is stated as the 12 KiB a request is refused at. `net/http` reads 4 KiB beyond `MaxHeaderBytes` for its buffer.
+
+## 2.0.2 - 2026-09-21
+
+### Breaking
+
+- Downloads use the current MaxMind endpoint, which authenticates with HTTP basic auth. `MAXMIND_ACCOUNT_ID` is required beside `GEOIP_LICENSE_KEY`.
+- `-u` counts whole hours instead of taking a Go duration. `-u 24h` is now `-u 24`. MaxMind limits downloads per day, so nothing below an hour is useful.
+- `metro_code` is gone from the response and the page. MaxMind deprecated the field.
+
+### Changed
+
+- The MaxMind credentials are required only when a database is configured and `-u` is not `0`.
+- What a caller can send is bounded: 8 KiB of request headers, 32 bytes of body on `POST /debug/cache/resize`, 128 characters of any error message.
+- The response cache evicts the entry that was read longest ago instead of the one inserted first, so a client that keeps asking stays cached. A read takes the write lock now.
+- CI runs `setup-go` v7 and `metadata-action` v6.
+
+### Fixed
+
+- `/coordinates` answers with nothing when the address has no location, instead of `0.000000,0.000000`.
+- A failed GeoIP lookup is logged. An address the database does not hold returns no error, so a failure means an unreadable file, and it passed without a trace.
+- The browser page is rendered into a buffer before it is written, so a template failure cannot leave a truncated page that the 500 no longer reaches.
+- `country_eu` follows the country of the address alone. A block registered in the EU and used elsewhere reported `true`.
+
+### Documentation
+
+- `nginx.conf` and `screenshot.png` are in the repository root. The nginx example is a file nginx can read, with its prose in the comments.
+- The README states that 2.0.1 and 2.0.2 carry breaking changes despite being minor releases.
 
 ## 2.0.1 - 2026-09-20
 

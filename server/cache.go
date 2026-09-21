@@ -1,4 +1,4 @@
-package http
+package server
 
 import (
 	"container/list"
@@ -16,6 +16,13 @@ type Cache struct {
 	entries   map[netip.Addr]*list.Element
 	values    *list.List
 	evictions uint64
+}
+
+// cacheEntry carries its own key, so eviction does not have to read it back
+// out of the response.
+type cacheEntry struct {
+	addr     netip.Addr
+	response Response
 }
 
 type CacheStats struct {
@@ -49,7 +56,7 @@ func (c *Cache) Set(addr netip.Addr, resp Response) {
 	}
 
 	c.evict(len(c.entries) - c.capacity + 1)
-	c.entries[addr] = c.values.PushBack(resp)
+	c.entries[addr] = c.values.PushBack(&cacheEntry{addr: addr, response: resp})
 }
 
 // Get takes the write lock, because a hit moves its entry to the back of the
@@ -64,7 +71,7 @@ func (c *Cache) Get(addr netip.Addr) (Response, bool) {
 	}
 	c.values.MoveToBack(el)
 
-	return el.Value.(Response), true
+	return el.Value.(*cacheEntry).response, true
 }
 
 // Clear removes every entry.
@@ -109,7 +116,7 @@ func (c *Cache) Stats() CacheStats {
 func (c *Cache) evict(n int) {
 	for el := c.values.Front(); n > 0 && el != nil; n-- {
 		next := el.Next()
-		delete(c.entries, el.Value.(Response).IP)
+		delete(c.entries, el.Value.(*cacheEntry).addr)
 		c.values.Remove(el)
 		el = next
 		c.evictions++

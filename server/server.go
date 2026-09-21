@@ -1,4 +1,4 @@
-package http
+package server
 
 import (
 	"context"
@@ -26,6 +26,8 @@ const (
 	jsonMediaType = "application/json"
 	textMediaType = "text/plain"
 
+	htmlContentType = "text/html; charset=utf-8"
+
 	// The template rendered for browsers. The other files beside it are
 	// included from it.
 	indexTemplate = "index.html"
@@ -44,7 +46,8 @@ const (
 
 // maxHeaderBytes caps the request line and the headers. The default is a
 // megabyte per connection, and nothing this service answers needs more than a
-// browser sends.
+// browser sends. net/http reads up to 4 KiB beyond this for its buffer, so a
+// request is refused at 12 KiB.
 const maxHeaderBytes = 8 << 10
 
 // Config holds the options that stay fixed while the server runs.
@@ -93,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	r.Route("GET", "/city", s.cliField(func(r Response) string { return r.City })).MatcherFunc(s.hasCity)
 	r.Route("GET", "/coordinates", s.cliField(Response.Coordinates)).MatcherFunc(s.hasCity)
 	r.Route("GET", "/asn", s.cliField(func(r Response) string { return r.ASN })).MatcherFunc(s.hasASN)
+	r.Route("GET", "/asn-org", s.cliField(func(r Response) string { return r.ASNOrg })).MatcherFunc(s.hasASN)
 
 	r.Route("GET", "/", s.browserHandler)
 
