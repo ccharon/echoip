@@ -12,6 +12,7 @@
 
         let path = "";
         let value = response.ip;
+        let unavailable = "";
 
         // The page was rendered for a supplied address, so the request line has
         // to carry it. response.ip is the parsed form the server reports.
@@ -35,6 +36,9 @@
         // Only the address this page was rendered for is known here. Anything
         // else has to be fetched, which the command line above does.
         function preview() {
+            if (unavailable) {
+                return unavailable;
+            }
             const address = ipField.value.trim();
             if (address && address !== response.ip) {
                 return "Open the request to see the answer for another address.";
@@ -48,6 +52,7 @@
         function selectEndpoint(button) {
             path = button.dataset.path;
             value = button.dataset.value;
+            unavailable = button.dataset.unavailable || "";
             for (const chip of endpoints.querySelectorAll(".chip")) {
                 chip.setAttribute("aria-pressed", String(chip === button));
             }

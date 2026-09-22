@@ -2,71 +2,112 @@ package server
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 )
 
-type Router struct {
-	routes []*Route
+type router struct {
+	routes []*route
 }
 
-type Route struct {
+type route struct {
 	method      string
 	path        string
 	prefix      bool
 	handler     appHandler
 	matcherFunc func(*http.Request) bool
+	format      format
 }
 
-func NewRouter() *Router {
-	return &Router{}
+func newRouter() *router {
+	return &router{}
 }
 
-func (r *Router) Route(method, path string, handler appHandler) *Route {
-	route := Route{
+func (r *router) Route(method, path string, handler appHandler) *route {
+	rt := route{
 		method:  method,
 		path:    path,
 		handler: handler,
 	}
-	r.routes = append(r.routes, &route)
-	return &route
+	r.routes = append(r.routes, &rt)
+	return &rt
 }
 
-func (r *Router) RoutePrefix(method, path string, handler appHandler) *Route {
+func (r *router) RoutePrefix(method, path string, handler appHandler) *route {
 	route := r.Route(method, path, handler)
 	route.prefix = true
 	return route
 }
 
-func (r *Router) Handler() http.Handler {
-	return appHandler(func(w http.ResponseWriter, req *http.Request) *AppError {
+// Handler dispatches to the first route that matches, and a failure takes the
+// format of that route. A path that exists for other methods gets 405 with
+// Allow in the format of the first route on it, or 204 with Allow for OPTIONS.
+func (r *router) Handler() appHandler {
+	return appHandler(func(w http.ResponseWriter, req *http.Request) *appError {
+		var allowed []string
+		var f format
 		for _, route := range r.routes {
-			if route.match(req) {
-				return route.handler(w, req)
+			if !route.serves(req) {
+				continue
 			}
+			if route.matchMethod(req) {
+				e := route.handler(w, req)
+				if e != nil && e.format == negotiated {
+					e.format = route.format
+				}
+				return e
+			}
+			if allowed == nil {
+				f = route.format
+			}
+			allowed = appendMethods(allowed, route.method)
 		}
-		return notFoundHandler(w, req)
+		if len(allowed) == 0 {
+			return newError(notFound, "No endpoint answers at this path.")
+		}
+
+		allow := strings.Join(append(allowed, http.MethodOptions), ", ")
+		w.Header().Set("Allow", allow)
+		if req.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return nil
+		}
+		e := newError(methodNotAllowed, "This path answers "+allow+".")
+		e.format = f
+		return e
 	})
 }
 
-// Accept limits the route to requests whose Accept header asks for mediaType.
-func (r *Route) Accept(mediaType string) *Route {
-	return r.MatcherFunc(func(req *http.Request) bool {
-		return acceptsMediaType(req, mediaType)
-	})
+// appendMethods adds method to allowed once, and HEAD after GET, because the
+// router answers HEAD with the GET handler.
+func appendMethods(allowed []string, method string) []string {
+	methods := []string{method}
+	if method == http.MethodGet {
+		methods = append(methods, http.MethodHead)
+	}
+	for _, m := range methods {
+		if !slices.Contains(allowed, m) {
+			allowed = append(allowed, m)
+		}
+	}
+	return allowed
+}
+
+// Format sets what the route answers in, and with it what its failures come
+// in.
+func (r *route) Format(f format) *route {
+	r.format = f
+	return r
 }
 
 // MatcherFunc limits the route to requests that f accepts.
-func (r *Route) MatcherFunc(f func(*http.Request) bool) *Route {
+func (r *route) MatcherFunc(f func(*http.Request) bool) *route {
 	r.matcherFunc = f
 	return r
 }
 
-func (r *Route) match(req *http.Request) bool {
-	// HEAD asks for the headers a GET would send. net/http drops the body.
-	head := req.Method == http.MethodHead && r.method == http.MethodGet
-	if req.Method != r.method && !head {
-		return false
-	}
+// serves reports whether the route matches req apart from its method.
+func (r *route) serves(req *http.Request) bool {
 	if r.prefix {
 		if !strings.HasPrefix(req.URL.Path, r.path) {
 			return false
@@ -75,4 +116,10 @@ func (r *Route) match(req *http.Request) bool {
 		return false
 	}
 	return r.matcherFunc == nil || r.matcherFunc(req)
+}
+
+// matchMethod reports whether the route answers the method of req. HEAD asks
+// for the headers a GET would send, and net/http drops the body.
+func (r *route) matchMethod(req *http.Request) bool {
+	return req.Method == r.method || req.Method == http.MethodHead && r.method == http.MethodGet
 }

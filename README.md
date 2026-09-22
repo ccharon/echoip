@@ -5,8 +5,8 @@
 
 HTTP service that returns the caller's IP address, enriched with location and
 ASN data from the MaxMind GeoLite2 databases. The response format follows the
-`Accept` header and the user agent: plain text for CLI clients, JSON for
-`application/json`, an HTML page for browsers.
+`Accept` header and the user agent: plain text for CLI clients, JSON when
+`Accept` weights `application/json` highest, an HTML page for browsers.
 
 Fork of [leafcloudhq/echoip](https://github.com/leafcloudhq/echoip), which is
 a fork of [mpolden/echoip](https://github.com/mpolden/echoip).
@@ -39,7 +39,7 @@ docker compose up -d
 
 The first start downloads about 80 MB before the server accepts requests. The
 server also runs without a database. It answers `/`, `/ip` and `/json` without
-geo data, and the other endpoints answer `404` until their database is in
+geo data, and the other endpoints answer `503` until their database is in
 place.
 
 ```yaml
@@ -104,7 +104,6 @@ Elbonia
 $ curl echoip.example.com/json
 {
   "ip": "203.0.113.9",
-  "ip_decimal": 3405803785,
   "country": "Elbonia",
   "country_iso": "EB",
   "city": "Bornyasherk",
@@ -115,6 +114,66 @@ $ curl echoip.example.com/json
 
 `?ip=` answers for another address, which has to be a public one. Pass `-4` or
 `-6` to the client to pick the address family.
+
+A path that exists answers other methods with `405` and `OPTIONS` with `204`,
+both with an `Allow` header.
+
+## Errors
+
+A failure comes in the format a success on the same request would have come
+in. `/json` and `/debug/cache/*` answer with problem details after RFC 9457,
+`/ip` and the field endpoints with one line of text, and `/` and unknown paths
+negotiate like `/` does: JSON when `Accept` prefers it, text for a CLI client
+or `text/plain`, the error page otherwise.
+
+```
+$ curl echoip.example.com/country?ip=10.0.0.5
+error: 10.0.0.5 is not a public address and is not looked up.
+```
+
+```
+$ curl echoip.example.com/json?ip=10.0.0.5
+{
+  "type": "https://github.com/ccharon/echoip#not-public-address",
+  "title": "Address is not public",
+  "status": 400,
+  "detail": "10.0.0.5 is not a public address and is not looked up."
+}
+```
+
+`type` names the kind of failure and links to its entry below. `title` is fixed
+per type, `detail` describes the case at hand.
+
+### invalid-address
+
+`400`. The address in `?ip=` or in a trusted header is not an IP address.
+
+### not-public-address
+
+`400`. The address is private, reserved or loopback, and is not looked up.
+
+### invalid-capacity
+
+`400`. The body of `POST /debug/cache/resize` is not a whole number of at
+least 0.
+
+### not-found
+
+`404`. No endpoint answers at the path. The field endpoints of a database that
+is not configured with `-c` or `-a` are absent as well.
+
+### method-not-allowed
+
+`405`. The path exists for other methods, which `Allow` names.
+
+### database-unavailable
+
+`503`. The database the endpoint needs is configured and not loaded yet.
+`Retry-After` names the seconds until the updater tries again.
+
+### internal
+
+`500`. The request could not be completed. The cause is in the log only.
 
 ## Configure
 
@@ -157,13 +216,13 @@ The service answers unauthenticated requests from anyone.
 | --- | --- |
 | The service opens no outbound connections | It answers from the GeoIP databases only, so a caller cannot make it reach an address of their choosing. |
 | Only public addresses are looked up | An address from `?ip=` or from a trusted header is refused with `400` unless it is globally reachable. The address the connection came from is always answered for. |
-| Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`. |
+| Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cache-Control: no-store`. |
 | Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`. |
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it. |
 | Requests are bounded | Headers are refused at 12 KiB, the body of `/debug/cache/resize` at 32 bytes, and an error quotes at most 128 characters of what the caller sent. |
 | The container runs as an unprivileged user | UID 65532, with a read-only root filesystem, no capabilities and `no-new-privileges`. |
 | The credentials never reach a log | They are read from the environment and sent in an `Authorization` header, and errors are stripped of the request URL. |
-| Refused requests are logged | Every 4xx and 5xx is written with the peer address, the method, the target and the reason, quoted and cut at 128 characters. |
+| Refused requests are logged | Every 4xx and 5xx is written as a `key=value` line with the peer address, the address a trusted proxy reported, the method, the target and the reason. Values are quoted where needed and cut at 128 characters. |
 
 Set `-H` only for headers the proxy overwrites, otherwise a caller picks the
 address they are shown data for. `-T` narrows that to the networks the proxy

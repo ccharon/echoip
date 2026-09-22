@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -13,13 +14,16 @@ var securityHeaders = map[string]string{
 	"X-Content-Type-Options": "nosniff",
 	"Referrer-Policy":        "no-referrer",
 	"X-Frame-Options":        "DENY",
+	// Every answer names the address of whoever asked, so no cache between
+	// the service and the client may hand it to someone else.
+	"Cache-Control": "no-store",
 }
 
 // inlineBlock matches the body of an inline script or style element.
 var inlineBlock = regexp.MustCompile(`(?s)<(script|style)\b[^>]*>(.*?)</(?:script|style)>`)
 
-// contentSecurityPolicy describes what the browser page may load. The hashes
-// that allow its inline script and style cover the rendered page, because
+// contentSecurityPolicy describes what the browser pages may load. The hashes
+// that allow their inline script and style cover the rendered pages, because
 // html/template drops comments from those elements.
 func contentSecurityPolicy() string {
 	var scripts, styles []string
@@ -27,9 +31,9 @@ func contentSecurityPolicy() string {
 	for _, block := range inlineBlocks() {
 		source := "'sha256-" + hashOf(block.content) + "'"
 		if block.tag == "script" {
-			scripts = append(scripts, source)
+			scripts = appendOnce(scripts, source)
 		} else {
-			styles = append(styles, source)
+			styles = appendOnce(styles, source)
 		}
 	}
 
@@ -59,12 +63,22 @@ func inlineBlocks() []inlineContent {
 	if err := pageTemplate.ExecuteTemplate(&page, indexTemplate, &pageData{}); err != nil {
 		panic("rendering the page for the content security policy: " + err.Error())
 	}
+	if err := pageTemplate.ExecuteTemplate(&page, errorTemplate, &errorData{}); err != nil {
+		panic("rendering the error page for the content security policy: " + err.Error())
+	}
 
 	var blocks []inlineContent
 	for _, match := range inlineBlock.FindAllStringSubmatch(page.String(), -1) {
 		blocks = append(blocks, inlineContent{tag: match[1], content: match[2]})
 	}
 	return blocks
+}
+
+func appendOnce(sources []string, source string) []string {
+	if slices.Contains(sources, source) {
+		return sources
+	}
+	return append(sources, source)
 }
 
 func sources(hashes []string) string {

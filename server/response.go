@@ -1,20 +1,20 @@
 package server
 
 import (
+	"context"
 	"fmt"
-	"log"
-	"math/big"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"strconv"
 
-	"github.com/ccharon/echoip/iputil"
 	"github.com/ccharon/echoip/useragent"
 )
 
+// Response is what the service reports about an address, as JSON and in the
+// page.
 type Response struct {
 	IP         netip.Addr           `json:"ip"`
-	IPDecimal  *big.Int             `json:"ip_decimal"`
 	Country    string               `json:"country,omitempty"`
 	CountryISO string               `json:"country_iso,omitempty"`
 	CountryEU  *bool                `json:"country_eu,omitempty"`
@@ -22,8 +22,8 @@ type Response struct {
 	RegionCode string               `json:"region_code,omitempty"`
 	PostalCode string               `json:"zip_code,omitempty"`
 	City       string               `json:"city,omitempty"`
-	Latitude   float64              `json:"latitude,omitempty"`
-	Longitude  float64              `json:"longitude,omitempty"`
+	Latitude   *float64             `json:"latitude,omitempty"`
+	Longitude  *float64             `json:"longitude,omitempty"`
 	Timezone   string               `json:"time_zone,omitempty"`
 	ASN        string               `json:"asn,omitempty"`
 	ASNOrg     string               `json:"asn_org,omitempty"`
@@ -32,13 +32,12 @@ type Response struct {
 }
 
 // Coordinates formats latitude and longitude the way the CLI response prints
-// them. Without a location it answers with nothing, because 0,0 is a place in
-// the Gulf of Guinea rather than an absent one.
+// them, or nothing without a location.
 func (r Response) Coordinates() string {
-	if r.Latitude == 0 && r.Longitude == 0 {
+	if r.Latitude == nil || r.Longitude == nil {
 		return ""
 	}
-	return formatCoordinate(r.Latitude) + "," + formatCoordinate(r.Longitude)
+	return formatCoordinate(*r.Latitude) + "," + formatCoordinate(*r.Longitude)
 }
 
 func formatCoordinate(c float64) string {
@@ -46,16 +45,19 @@ func formatCoordinate(c float64) string {
 }
 
 // newResponse answers from the cache when the address is known.
-func (s *Server) newResponse(r *http.Request) (Response, error) {
-	addr, err := s.ipFromRequest(r)
-	if err != nil {
-		return Response{}, err
+func (s *Server) newResponse(r *http.Request) (Response, *appError) {
+	addr, e := s.ipFromRequest(r)
+	if e != nil {
+		return Response{}, e
 	}
 
-	response, cached := s.cache.Get(addr)
+	response, cached := s.cache.get(addr)
 	if !cached {
-		response = s.lookup(addr)
-		s.cache.Set(addr, response)
+		response = s.lookup(r.Context(), addr)
+		// A client that left may have cut the reverse lookup short.
+		if r.Context().Err() == nil {
+			s.cache.set(addr, response)
+		}
 	}
 
 	// The user agent belongs to the request, not to the address, so it is
@@ -68,21 +70,21 @@ func (s *Server) newResponse(r *http.Request) (Response, error) {
 // lookup gathers what the databases and the resolver know about addr. A lookup
 // that fails leaves its fields empty, which is what a missing database gives
 // as well.
-func (s *Server) lookup(addr netip.Addr) Response {
+func (s *Server) lookup(ctx context.Context, addr netip.Addr) Response {
 	// An address the database does not hold is no error, so a failure here
 	// means the file itself is unreadable and the operator wants to know.
 	city, err := s.geo.City(addr)
 	if err != nil {
-		log.Printf("City lookup failed for %s: %v", addr, err)
+		slog.Error("city lookup failed", "ip", addr, "error", err)
 	}
 	asn, err := s.geo.ASN(addr)
 	if err != nil {
-		log.Printf("ASN lookup failed for %s: %v", addr, err)
+		slog.Error("ASN lookup failed", "ip", addr, "error", err)
 	}
 
 	var hostname string
 	if s.cfg.LookupAddr != nil {
-		hostname, _ = s.cfg.LookupAddr(addr)
+		hostname, _ = s.cfg.LookupAddr(ctx, addr)
 	}
 
 	var asnumber string
@@ -92,7 +94,6 @@ func (s *Server) lookup(addr netip.Addr) Response {
 
 	return Response{
 		IP:         addr,
-		IPDecimal:  iputil.ToDecimal(addr),
 		Country:    city.CountryName,
 		CountryISO: city.CountryISO,
 		CountryEU:  city.CountryIsEU,

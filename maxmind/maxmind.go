@@ -11,7 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"maps"
 	"math"
 	"net/http"
@@ -29,8 +29,7 @@ const (
 	EditionASN  = "GeoLite2-ASN"
 )
 
-// Overridden in tests.
-var downloadURL = "https://download.maxmind.com/geoip/databases"
+const defaultEndpoint = "https://download.maxmind.com/geoip/databases"
 
 // Credentials and the signed URL a redirect leads to have no business on a
 // plain connection, so a hop that leaves the scheme of the first request is
@@ -65,6 +64,7 @@ const (
 	retryInterval = 15 * time.Minute
 )
 
+// Updater keeps GeoLite2 databases on disk current.
 type Updater struct {
 	// AccountID and LicenseKey authenticate the download.
 	AccountID  string
@@ -72,7 +72,11 @@ type Updater struct {
 	// Databases maps a GeoLite2 edition ID to the file it is written to.
 	Databases map[string]string
 	Interval  time.Duration
-	Timeout   time.Duration
+	// Timeout bounds one download. Zero means defaultTimeout.
+	Timeout time.Duration
+
+	// endpoint replaces defaultEndpoint in tests.
+	endpoint string
 }
 
 // Enabled reports whether this updater has everything it needs to download.
@@ -151,17 +155,17 @@ func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 func (u *Updater) refresh(ctx context.Context, onUpdate func() error) time.Duration {
 	changed, updateErr := u.Update(ctx)
 	if updateErr != nil {
-		log.Printf("GeoIP update failed: %v", updateErr)
+		slog.Error("GeoIP update failed", "error", updateErr)
 	}
 
 	// An edition that was replaced before a later one failed is loaded all the
 	// same, so it does not wait on disk until a check succeeds as a whole.
 	if changed {
 		if err := onUpdate(); err != nil {
-			log.Printf("Reloading GeoIP databases failed: %v", err)
+			slog.Error("reloading GeoIP databases failed", "error", err)
 			return u.retryDelay()
 		}
-		log.Print("GeoIP databases updated")
+		slog.Info("GeoIP databases updated")
 	}
 
 	if updateErr != nil {
@@ -235,7 +239,7 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 // credentials go in a header, so they stay out of the URL a log or an error
 // might carry.
 func (u *Updater) request(ctx context.Context, edition, suffix string) (*http.Request, error) {
-	target := downloadURL + "/" + url.PathEscape(edition) + "/download?suffix=" + url.QueryEscape(suffix)
+	target := cmp.Or(u.endpoint, defaultEndpoint) + "/" + url.PathEscape(edition) + "/download?suffix=" + url.QueryEscape(suffix)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {

@@ -25,7 +25,6 @@
             <table class="facts">
                 <tbody>
                 <tr><th scope="row">IP address</th><td>{{ .IP }}</td></tr>
-                <tr><th scope="row">IP address (decimal)</th><td>{{ .IPDecimal }}</td></tr>
                 {{ if .Country }}<tr><th scope="row">Country</th><td>{{ .Country }}</td></tr>{{ end }}
                 {{ if .CountryISO }}<tr><th scope="row">Country (ISO code)</th><td>{{ .CountryISO }}</td></tr>{{ end }}
                 {{ if .CountryEU }}<tr><th scope="row">In EU</th><td>{{ .CountryEU }}</td></tr>{{ end }}
@@ -49,7 +48,7 @@
         </section>
 
         <div>
-            {{ if .Latitude }}
+            {{ if and .Latitude .Longitude }}
             <section class="card">
                 <h2>Location</h2>
                 <iframe class="map" title="Map of the approximate location"
@@ -64,12 +63,9 @@
 
                 <div class="endpoints" id="endpoints" role="group" aria-label="Endpoint">
                     <button type="button" class="chip" data-path="" data-value="{{ .IP }}" aria-pressed="true">ip</button>
-                    <button type="button" class="chip" data-path="country" data-value="{{ .Country }}" aria-pressed="false">country</button>
-                    <button type="button" class="chip" data-path="country-iso" data-value="{{ .CountryISO }}" aria-pressed="false">country-iso</button>
-                    <button type="button" class="chip" data-path="city" data-value="{{ .City }}" aria-pressed="false">city</button>
-                    <button type="button" class="chip" data-path="coordinates" data-value="{{ .Coordinates }}" aria-pressed="false">coordinates</button>
-                    <button type="button" class="chip" data-path="asn" data-value="{{ .ASN }}" aria-pressed="false">asn</button>
-                    <button type="button" class="chip" data-path="asn-org" data-value="{{ .ASNOrg }}" aria-pressed="false">asn-org</button>
+                    {{ range .Chips }}
+                    <button type="button" class="chip" data-path="{{ .Path }}" data-value="{{ .Value }}"{{ with .Unavailable }} data-unavailable="{{ . }}"{{ end }} aria-pressed="false">{{ .Path }}</button>
+                    {{ end }}
                     <button type="button" class="chip" data-path="json" aria-pressed="false">json</button>
                 </div>
 

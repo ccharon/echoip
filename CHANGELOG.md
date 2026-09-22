@@ -1,6 +1,34 @@
 # Changelog
 
-## 2.0.3 - Unreleased
+## 2.0.4 - Unreleased
+
+### Breaking
+
+- The log is written by `log/slog` as `key=value` lines with a level. The `echoip: ` prefix and the source file are gone.
+- A failure comes in the format a success on the same request would have come in: problem details after RFC 9457 from `/json`, one line of text starting with `error:` from `/ip` and the field endpoints, an error page for browsers. `type` names the kind of failure from a fixed list in the README. The `error` field is gone.
+- The field endpoints answer `503` with `Retry-After` while their database is configured and not loaded. They used to answer `404`.
+- `/` picks JSON, text or the page by the weights in `Accept`. `text/html, application/json;q=0.5` gets the page, it used to get JSON.
+- `ip_decimal` is gone from the response and the page, and `iputil.ToDecimal` with it. An IPv6 address does not fit the number type most JSON parsers use.
+
+### Added
+
+- A path that exists answers other methods with `405` and `OPTIONS` with `204`, both with an `Allow` header. Both used to get `404`. The `405` comes in the format of the route.
+- A panic in a handler answers `500` and logs the stack. After the handler has written, the connection is dropped.
+- A refused request is logged with the address a trusted proxy reported, beside the peer address.
+
+### Changed
+
+- Every response carries `Cache-Control: no-store` and `Vary: Accept, User-Agent`.
+- A weight in `Accept` counts only in the form RFC 9110 allows. An entry with any other weight is ignored.
+- The text endpoints name `text/plain; charset=utf-8`, also for `HEAD`.
+- `latitude` and `longitude` are left out only when the location is unknown. A coordinate of exactly 0 used to be left out as well.
+- A reverse lookup stops when the client leaves, and its answer is not cached.
+- The page offers buttons only for the field endpoints the server registered. While a database is not loaded, the preview says so.
+- `/debug/cache/resize` refuses a body with anything besides the number, and a body longer than 32 bytes.
+- An address that is refused as not public is named without its zone, so the text error stays one line. A value refused as no address is bounded after quoting.
+- `server.GeoReader` replaces `geo.Reader`. `iputil.LookupAddr` and `server.Config.LookupAddr` take a context. The router, `AppError` and the cache methods other than `Clear` are unexported.
+
+## 2.0.3 - 2026-09-22
 
 ### Added
 

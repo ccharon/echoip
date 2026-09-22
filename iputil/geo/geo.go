@@ -1,3 +1,5 @@
+// Package geo reads MaxMind GeoLite2 databases that may be replaced while the
+// server runs.
 package geo
 
 import (
@@ -10,22 +12,12 @@ import (
 	"github.com/oschwald/geoip2-golang/v2"
 )
 
-// Reader looks up GeoIP records. The Has methods report which lookups the
-// databases currently loaded can answer, the Built methods when MaxMind built
-// them.
-type Reader interface {
-	City(netip.Addr) (City, error)
-	ASN(netip.Addr) (ASN, error)
-	HasCity() bool
-	HasASN() bool
-	CityBuilt() time.Time
-	ASNBuilt() time.Time
-}
-
+// City is what the city database knows about an address. Empty fields are
+// unknown.
 type City struct {
 	Name        string
-	Latitude    float64
-	Longitude   float64
+	Latitude    *float64
+	Longitude   *float64
 	PostalCode  string
 	Timezone    string
 	RegionName  string
@@ -35,6 +27,7 @@ type City struct {
 	CountryIsEU *bool
 }
 
+// ASN names the autonomous system that announces an address.
 type ASN struct {
 	AutonomousSystemNumber       uint
 	AutonomousSystemOrganization string
@@ -106,6 +99,8 @@ func closeReader(r *geoip2.Reader) {
 	}
 }
 
+// City looks up addr in the city database. Without one, or for an address it
+// does not hold, the result is empty and the error nil.
 func (d *Database) City(addr netip.Addr) (City, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -142,13 +137,8 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 		city.RegionCode = record.Subdivisions[0].ISOCode
 	}
 
-	if record.Location.Latitude != nil {
-		city.Latitude = *record.Location.Latitude
-	}
-
-	if record.Location.Longitude != nil {
-		city.Longitude = *record.Location.Longitude
-	}
+	city.Latitude = record.Location.Latitude
+	city.Longitude = record.Location.Longitude
 
 	city.PostalCode = record.Postal.Code
 	city.Timezone = record.Location.TimeZone
@@ -156,6 +146,7 @@ func (d *Database) City(addr netip.Addr) (City, error) {
 	return city, nil
 }
 
+// ASN looks up addr in the ASN database, with the same empty results as City.
 func (d *Database) ASN(addr netip.Addr) (ASN, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -175,12 +166,14 @@ func (d *Database) ASN(addr netip.Addr) (ASN, error) {
 	}, nil
 }
 
+// HasCity reports whether a city database is loaded.
 func (d *Database) HasCity() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.city != nil
 }
 
+// HasASN reports whether an ASN database is loaded.
 func (d *Database) HasASN() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()

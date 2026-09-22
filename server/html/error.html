@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>{{ .Status }} {{ .Title }}</title>
+    <meta name="referrer" content="no-referrer"/>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🌐</text></svg>"/>
+    {{ template "styles.html" . }}
+</head>
+<body>
+<div class="page">
+    <header class="hero">
+        <p class="eyebrow">Error {{ .Status }}</p>
+        <h1>{{ .Title }}</h1>
+    </header>
+
+    <main class="grid">
+        <section class="card">
+            <p>{{ .Detail }}</p>
+            <p><a href="/">Show my IP address</a></p>
+        </section>
+    </main>
+</div>
+</body>
+</html>

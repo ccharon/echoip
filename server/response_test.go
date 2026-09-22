@@ -1,21 +1,26 @@
 package server
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
+	"testing"
+)
 
 func TestCoordinates(t *testing.T) {
 	tests := []struct {
 		name string
-		lat  float64
-		lon  float64
+		lat  *float64
+		lon  *float64
 		want string
 	}{
-		{"both", 63.416667, 10.416667, "63.416667,10.416667"},
-		{"southern and western", -29, -82.3925, "-29.000000,-82.392500"},
-		{"latitude alone", 63.416667, 0, "63.416667,0.000000"},
-		{"longitude alone", 0, 10.416667, "0.000000,10.416667"},
-		// A lookup that found nothing leaves both at zero, which is a place in
-		// the Gulf of Guinea rather than an answer.
-		{"neither", 0, 0, ""},
+		{"both", new(63.416667), new(10.416667), "63.416667,10.416667"},
+		{"southern and western", new(-29.0), new(-82.3925), "-29.000000,-82.392500"},
+		{"zero is a place", new(0.0), new(0.0), "0.000000,0.000000"},
+		{"latitude alone", new(63.416667), nil, ""},
+		{"longitude alone", nil, new(10.416667), ""},
+		{"neither", nil, nil, ""},
 	}
 
 	for _, tt := range tests {
@@ -25,5 +30,40 @@ func TestCoordinates(t *testing.T) {
 				t.Errorf("Coordinates() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A client that leaves cancels the reverse lookup, and the answer it cut short
+// must not be cached without its hostname.
+func TestCancelledLookupIsNotCached(t *testing.T) {
+	cfg := Config{LookupAddr: func(ctx context.Context, _ netip.Addr) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return "localhost", nil
+	}}
+	srv := New(cfg, &testDB{}, NewCache(10))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/json", nil)
+
+	response, err := srv.newResponse(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Hostname != "" {
+		t.Errorf("expected no hostname after the client left, got %q", response.Hostname)
+	}
+	if size := srv.cache.stats().Size; size != 0 {
+		t.Errorf("expected nothing cached, got %d entries", size)
+	}
+
+	response, err = srv.newResponse(httptest.NewRequest(http.MethodGet, "/json", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Hostname != "localhost" {
+		t.Errorf("expected the hostname on the next request, got %q", response.Hostname)
 	}
 }

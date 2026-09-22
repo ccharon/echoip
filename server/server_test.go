@@ -3,8 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,8 +33,7 @@ func TestListenAndServeShutsDown(t *testing.T) {
 // The page is built into the binary, so it is served without any file beside
 // the executable.
 func TestBrowserPage(t *testing.T) {
-	log.SetOutput(io.Discard)
-	s := httptest.NewServer(New(Config{}, &testDb{}, NewCache(0)).Handler())
+	s := httptest.NewServer(New(Config{}, &testDB{}, NewCache(0)).Handler())
 
 	out, status, err := httpGet(s.URL, "", "Mozilla/5.0")
 	if err != nil {
@@ -53,7 +50,7 @@ func TestBrowserPage(t *testing.T) {
 // The limit is maxHeaderBytes plus the 4 KiB net/http reads for its buffer, so
 // a request is refused above 12 KiB rather than above 8.
 func TestHeaderLimit(t *testing.T) {
-	srv := New(Config{}, &testDb{}, NewCache(0))
+	srv := New(Config{}, &testDB{}, NewCache(0))
 	s := httptest.NewUnstartedServer(srv.Handler())
 	s.Config.MaxHeaderBytes = maxHeaderBytes
 	s.Start()
