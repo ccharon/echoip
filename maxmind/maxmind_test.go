@@ -9,8 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -134,10 +132,9 @@ func TestUpdateLeavesNoTempFiles(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
 	dir := t.TempDir()
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -184,10 +181,9 @@ func TestUpdate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
 	dir := t.TempDir()
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -233,14 +229,13 @@ func TestUpdateKeepsExistingDatabaseOnError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
 	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
 	if err := os.WriteFile(path, []byte("old database"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -271,9 +266,8 @@ func TestUpdateErrorHidesLicenseKey(t *testing.T) {
 	url := srv.URL
 	srv.Close()
 
-	defer swapDownloadURL(url)()
-
 	u := &Updater{
+		endpoint:   url,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -350,12 +344,6 @@ func TestEnabled(t *testing.T) {
 	}
 }
 
-func swapDownloadURL(url string) func() {
-	previous := downloadURL
-	downloadURL = url
-	return func() { downloadURL = previous }
-}
-
 func TestRetryDelay(t *testing.T) {
 	tests := []struct {
 		interval time.Duration
@@ -390,12 +378,8 @@ func TestRunRetriesAfterFailedDownload(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   10 * time.Millisecond,
@@ -526,12 +510,8 @@ func TestRunRefreshesRepeatedly(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   20 * time.Millisecond,
@@ -583,10 +563,9 @@ func TestUpdateSendsConditionalRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
 	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -649,12 +628,8 @@ func TestRunSkipsReloadWhenUnchanged(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   20 * time.Millisecond,
@@ -699,11 +674,10 @@ func TestUpdateRejectsWrongChecksum(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
 	dir := t.TempDir()
 	path := filepath.Join(dir, "GeoLite2-ASN.mmdb")
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -745,14 +719,13 @@ func TestUpdateKeepsDatabaseOnWrongChecksum(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
 	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
 	if err := os.WriteFile(path, []byte("old database"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -775,9 +748,7 @@ func TestUpdateKeepsDatabaseOnWrongChecksum(t *testing.T) {
 func TestChecksumErrorHidesLicenseKey(t *testing.T) {
 	// A checksum request that cannot be made at all, so the error carries the
 	// request URL unless it is stripped.
-	defer swapDownloadURL("http://127.0.0.1:1")()
-
-	u := &Updater{AccountID: "12345",
+	u := &Updater{endpoint: "http://127.0.0.1:1", AccountID: "12345",
 		LicenseKey: "super-secret", Interval: time.Hour}
 
 	err := u.verify(context.Background(), EditionASN, []byte{1, 2, 3})
@@ -803,9 +774,8 @@ func TestUpdateRefusesSchemeChange(t *testing.T) {
 		http.Redirect(w, r, target.URL, http.StatusFound)
 	}))
 	defer redirect.Close()
-	defer swapDownloadURL(redirect.URL)()
-
 	u := &Updater{
+		endpoint:   redirect.URL,
 		AccountID:  "12345",
 		LicenseKey: "super-secret",
 		Interval:   time.Hour,
@@ -842,10 +812,9 @@ func TestUpdateFollowsSameSchemeRedirect(t *testing.T) {
 		http.Redirect(w, r, target.URL+"?"+r.URL.RawQuery, http.StatusFound)
 	}))
 	defer redirect.Close()
-	defer swapDownloadURL(redirect.URL)()
-
 	path := filepath.Join(t.TempDir(), "db.mmdb")
 	u := &Updater{
+		endpoint:   redirect.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -901,14 +870,10 @@ func TestRefreshLoadsWhatWasDownloadedBeforeAnError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-
 	dir := t.TempDir()
 	asnPath := filepath.Join(dir, "GeoLite2-ASN.mmdb")
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -941,12 +906,8 @@ func TestRefreshRetriesWhenReloadFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,
@@ -970,11 +931,6 @@ func TestRefreshRetriesSoonerAfterAFailedCheck(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	defer swapDownloadURL(srv.URL)()
-
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-
 	// The database is present and current, so the age alone would put the next
 	// check a whole interval away. The failed request has to pull it closer.
 	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
@@ -983,6 +939,7 @@ func TestRefreshRetriesSoonerAfterAFailedCheck(t *testing.T) {
 	}
 
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   time.Hour,

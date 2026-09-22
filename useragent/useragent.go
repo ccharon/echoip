@@ -1,9 +1,11 @@
+// Package useragent parses the User-Agent header of HTTP clients.
 package useragent
 
 import (
 	"strings"
 )
 
+// UserAgent is a parsed User-Agent header. RawValue keeps the header as sent.
 type UserAgent struct {
 	Product  string `json:"product,omitempty"`
 	Version  string `json:"version,omitempty"`

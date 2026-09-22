@@ -44,9 +44,9 @@ func TestIPFromRequest(t *testing.T) {
 		}
 		r.Header.Add(tt.headerKey, tt.headerValue)
 		server := &Server{cfg: Config{IPHeaders: tt.trustedHeaders}}
-		addr, err := server.ipFromRequest(r)
-		if err != nil {
-			t.Fatal(err)
+		addr, e := server.ipFromRequest(r)
+		if e != nil {
+			t.Fatal(e)
 		}
 		if want := netip.MustParseAddr(tt.out); addr != want {
 			t.Errorf("Expected %s, got %s", want, addr)
@@ -81,12 +81,12 @@ func TestIPFromRequestRefusesSuppliedPrivate(t *testing.T) {
 			}
 
 			server := &Server{cfg: Config{IPHeaders: []string{"X-Forwarded-For"}}}
-			addr, err := server.ipFromRequest(r)
-			if err == nil {
+			addr, e := server.ipFromRequest(r)
+			if e == nil {
 				t.Fatalf("expected an error, got %s", addr)
 			}
-			if !strings.Contains(err.Error(), "not a public IP") {
-				t.Errorf("unexpected error: %v", err)
+			if e.problem != notPublicAddress {
+				t.Errorf("expected %s, got %s: %v", notPublicAddress.slug, e.problem.slug, e)
 			}
 		})
 	}
@@ -102,9 +102,9 @@ func TestIPFromRequestAllowsPrivatePeer(t *testing.T) {
 		}
 		r := &http.Request{RemoteAddr: u.Host, Header: http.Header{}, URL: u}
 
-		addr, err := (&Server{}).ipFromRequest(r)
-		if err != nil {
-			t.Fatalf("peer %s: %v", peer, err)
+		addr, e := (&Server{}).ipFromRequest(r)
+		if e != nil {
+			t.Fatalf("peer %s: %v", peer, e)
 		}
 		if want := netip.MustParseAddrPort(u.Host).Addr(); addr != want {
 			t.Errorf("peer %s: expected %s, got %s", peer, want, addr)
@@ -141,27 +141,46 @@ func TestCLIMatcher(t *testing.T) {
 	}
 }
 
-func TestAcceptsMediaType(t *testing.T) {
+func TestPreferredMediaType(t *testing.T) {
 	tests := []struct {
 		header string
-		out    bool
+		want   string
 	}{
-		{"application/json", true},
-		{"application/json, text/plain, */*", true},
-		{"application/json; charset=utf-8", true},
-		{"text/html, application/json;q=0.9", true},
-		{"application/json;q=0", false},
-		{"*/*", false},
-		{"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", false},
-		{"", false},
-		{"application/jsonp", false},
-		{"not a media type", false},
+		{"application/json", jsonMediaType},
+		{"application/json, text/plain, */*", jsonMediaType},
+		{"application/json; charset=utf-8", jsonMediaType},
+		{"text/plain", textMediaType},
+		{"text/plain, application/json", jsonMediaType},
+		{"text/html, application/json;q=0.9", htmlMediaType},
+		{"text/html;q=0.5, application/json", jsonMediaType},
+		{"text/plain;q=0.9, application/json;q=0.8", textMediaType},
+		{"application/json;q=0", ""},
+		{"application/json;q=0.0", ""},
+		{"application/json;q=0.000", ""},
+		{"application/json;q=0.", ""},
+		{"application/json;q=0.001", jsonMediaType},
+		{"application/json;q=1", jsonMediaType},
+		{"application/json;q=1.000", jsonMediaType},
+		{"application/json;q=1.001", ""},
+		{"application/json;q=0.0000", ""},
+		{"application/json;q=-0", ""},
+		{"application/json;q=-1", ""},
+		{"application/json;q=NaN", ""},
+		{"application/json;q=1e-3", ""},
+		{"application/json;q=0x1p-2", ""},
+		{"application/json;q=high, application/json", jsonMediaType},
+		{"application/json;q=0, text/plain;q=0.1", textMediaType},
+		{"*/*", ""},
+		{"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", htmlMediaType},
+		{"", ""},
+		{"application/jsonp", ""},
+		{"not a media type", ""},
 	}
 
 	for _, tt := range tests {
 		r := &http.Request{Header: http.Header{"Accept": []string{tt.header}}}
-		if got := acceptsMediaType(r, "application/json"); got != tt.out {
-			t.Errorf("Expected %t, got %t for %q", tt.out, got, tt.header)
+		if got := preferredMediaType(r); got != tt.want {
+			t.Errorf("preferredMediaType(%q) = %q, want %q", tt.header, got, tt.want)
 		}
 	}
 }
@@ -197,12 +216,64 @@ func TestTrustedProxies(t *testing.T) {
 			Header:     http.Header{"X-Real-Ip": []string{"1.3.3.7"}},
 		}
 
-		addr, err := server.ipFromRequest(r)
-		if err != nil {
-			t.Fatal(err)
+		addr, e := server.ipFromRequest(r)
+		if e != nil {
+			t.Fatal(e)
 		}
 		if want := netip.MustParseAddr(tt.out); addr != want {
 			t.Errorf("peer %s with %v: expected %s, got %s", tt.peer, tt.trusted, want, addr)
 		}
+	}
+}
+
+// A value that is no address is told apart from an address that is not public,
+// and the value is quoted so a newline in it stays visible.
+func TestIPFromRequestRefusesInvalid(t *testing.T) {
+	for _, v := range []string{"foo", "1.2.3", "10.0.0.1%0aforged"} {
+		u, err := url.Parse("http://203.0.113.9:9999?ip=" + v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &http.Request{RemoteAddr: u.Host, Header: http.Header{}, URL: u}
+
+		_, e := (&Server{}).ipFromRequest(r)
+		if e == nil {
+			t.Fatalf("%s: expected an error", v)
+		}
+		if e.problem != invalidAddress {
+			t.Errorf("%s: expected %s, got %s", v, invalidAddress.slug, e.problem.slug)
+		}
+		if strings.Contains(e.detail, "\n") {
+			t.Errorf("%s: detail carries a raw newline: %q", v, e.detail)
+		}
+	}
+}
+
+// Both details stay one bounded line, whatever the caller put into the value.
+func TestSuppliedAddrDetailIsBounded(t *testing.T) {
+	tests := []struct {
+		v       string
+		problem problem
+	}{
+		{"::%\n8.8.8.8\n", notPublicAddress},
+		{"fe80::1%" + strings.Repeat("a", 3000), notPublicAddress},
+		{strings.Repeat("\xff", 200), invalidAddress},
+	}
+
+	for _, tt := range tests {
+		_, e := suppliedAddr(tt.v)
+		if e == nil || e.problem != tt.problem {
+			t.Fatalf("%q: expected %s, got %v", tt.v, tt.problem.slug, e)
+		}
+		if strings.Contains(e.detail, "\n") {
+			t.Errorf("%q: detail spans lines: %q", tt.v, e.detail)
+		}
+		if len(e.detail) > maxValueLen+64 {
+			t.Errorf("%q: detail is %d bytes", tt.v, len(e.detail))
+		}
+	}
+
+	if _, e := suppliedAddr("fe80::1%eth0"); e.detail != "fe80::1 is not a public address and is not looked up." {
+		t.Errorf("expected the address without its zone, got %q", e.detail)
 	}
 }

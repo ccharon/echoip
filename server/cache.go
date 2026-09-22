@@ -25,12 +25,14 @@ type cacheEntry struct {
 	response Response
 }
 
-type CacheStats struct {
+// cacheStats is a snapshot of the cache for the debug handler.
+type cacheStats struct {
 	Capacity  int
 	Size      int
 	Evictions uint64
 }
 
+// NewCache returns an empty cache. A capacity below zero counts as zero.
 func NewCache(capacity int) *Cache {
 	if capacity < 0 {
 		capacity = 0
@@ -42,7 +44,8 @@ func NewCache(capacity int) *Cache {
 	}
 }
 
-func (c *Cache) Set(addr netip.Addr, resp Response) {
+// set stores resp for addr, evicting the entry read longest ago when full.
+func (c *Cache) set(addr netip.Addr, resp Response) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -59,9 +62,9 @@ func (c *Cache) Set(addr netip.Addr, resp Response) {
 	c.entries[addr] = c.values.PushBack(&cacheEntry{addr: addr, response: resp})
 }
 
-// Get takes the write lock, because a hit moves its entry to the back of the
+// get takes the write lock, because a hit moves its entry to the back of the
 // eviction order.
-func (c *Cache) Get(addr netip.Addr) (Response, bool) {
+func (c *Cache) get(addr netip.Addr) (Response, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -83,9 +86,9 @@ func (c *Cache) Clear() {
 	c.values.Init()
 }
 
-// Resize changes the capacity, dropping the oldest entries that no longer fit.
+// resize changes the capacity, dropping the oldest entries that no longer fit.
 // The eviction counter starts over, so it measures the new capacity.
-func (c *Cache) Resize(capacity int) error {
+func (c *Cache) resize(capacity int) error {
 	if capacity < 0 {
 		return fmt.Errorf("invalid capacity: %d", capacity)
 	}
@@ -100,11 +103,13 @@ func (c *Cache) Resize(capacity int) error {
 	return nil
 }
 
-func (c *Cache) Stats() CacheStats {
+// stats returns the current size, capacity and evictions since the last
+// resize.
+func (c *Cache) stats() cacheStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return CacheStats{
+	return cacheStats{
 		Size:      len(c.entries),
 		Capacity:  c.capacity,
 		Evictions: c.evictions,

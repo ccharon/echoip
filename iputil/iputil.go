@@ -1,8 +1,9 @@
+// Package iputil classifies IP addresses, formats them and resolves their
+// hostnames.
 package iputil
 
 import (
 	"context"
-	"math/big"
 	"net"
 	"net/netip"
 	"strings"
@@ -15,8 +16,8 @@ const lookupAddrTimeout = 2 * time.Second
 
 // LookupAddr returns the hostname of addr, without the trailing dot of the
 // resolver answer.
-func LookupAddr(addr netip.Addr) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), lookupAddrTimeout)
+func LookupAddr(ctx context.Context, addr netip.Addr) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, lookupAddrTimeout)
 	defer cancel()
 
 	names, err := net.DefaultResolver.LookupAddr(ctx, addr.String())
@@ -66,16 +67,4 @@ func Public(addr netip.Addr) bool {
 		}
 	}
 	return true
-}
-
-// ToDecimal returns the address as a number, an IPv4 address from its 4 bytes
-// so that the value matches the usual decimal notation.
-func ToDecimal(addr netip.Addr) *big.Int {
-	i := new(big.Int)
-	if addr.Is4() {
-		b := addr.As4()
-		return i.SetBytes(b[:])
-	}
-	b := addr.As16()
-	return i.SetBytes(b[:])
 }

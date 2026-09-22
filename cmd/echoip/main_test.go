@@ -4,9 +4,7 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"log"
 	"net/netip"
-	"os"
 	"slices"
 	"testing"
 	"time"
@@ -160,14 +158,12 @@ func TestEditions(t *testing.T) {
 }
 
 func TestServerConfig(t *testing.T) {
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-
 	cfg := serverConfig(&options{
 		headers:        []string{"X-Real-IP"},
 		trustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 		reverseLookup:  true,
 		profile:        true,
+		cityFile:       "data/GeoLite2-City.mmdb",
 	})
 
 	if cfg.LookupAddr == nil {
@@ -178,6 +174,9 @@ func TestServerConfig(t *testing.T) {
 	}
 	if len(cfg.TrustedProxies) != 1 {
 		t.Errorf("TrustedProxies = %v", cfg.TrustedProxies)
+	}
+	if !cfg.City || cfg.ASN {
+		t.Errorf("City = %t, ASN = %t, want only the configured city database", cfg.City, cfg.ASN)
 	}
 
 	if cfg = serverConfig(&options{}); cfg.LookupAddr != nil {

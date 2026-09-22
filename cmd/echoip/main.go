@@ -1,3 +1,5 @@
+// Command echoip answers HTTP requests with the IP address of the caller and
+// its GeoIP data.
 package main
 
 import (
@@ -6,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"os"
@@ -132,14 +134,11 @@ func editions(cityFile, asnFile string) map[string]string {
 	return e
 }
 
-func init() {
-	log.SetPrefix("echoip: ")
+func main() {
 	// The request log is an audit trail, so every line needs its own time. A
 	// supervisor that stamps as well leaves the two side by side.
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
-func main() {
 	opts, err := parseFlags(os.Args[1:], os.Stderr)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -153,7 +152,15 @@ func main() {
 		return
 	}
 
-	log.Printf("echoip %s", version)
+	if err := run(opts); err != nil {
+		slog.Error("stopped", "error", err)
+		os.Exit(1)
+	}
+}
+
+// run serves until SIGINT or SIGTERM.
+func run(opts *options) error {
+	slog.Info("starting echoip", "version", version)
 
 	updater := &maxmind.Updater{
 		AccountID:  os.Getenv(accountIDEnv),
@@ -162,30 +169,30 @@ func main() {
 		Databases:  editions(opts.cityFile, opts.asnFile),
 	}
 	if env := missingCredential(updater); env != "" {
-		log.Fatalf("%s must be set to download the GeoIP databases", env)
+		return fmt.Errorf("%s must be set to download the GeoIP databases", env)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if updater.Enabled() && updater.Stale() {
-		log.Print("Checking GeoIP databases")
+		slog.Info("checking GeoIP databases")
 		if _, err := updater.Update(ctx); err != nil {
-			log.Print(err)
+			slog.Error("GeoIP update failed", "error", err)
 		}
 	}
 
 	// A missing or broken database only disables the lookups that need it.
 	geoReader, err := geo.Open(opts.cityFile, opts.asnFile)
 	if err != nil {
-		log.Printf("GeoIP lookups are limited: %v", err)
+		slog.Warn("GeoIP lookups are limited", "error", err)
 	}
 
 	cache := server.NewCache(opts.cacheSize)
 	srv := server.New(serverConfig(opts), geoReader, cache)
 
 	if updater.Enabled() {
-		log.Printf("Checking GeoIP databases every %s", updater.Interval)
+		slog.Info("checking GeoIP databases periodically", "interval", updater.Interval)
 		go updater.Run(ctx, func() error {
 			if err := geoReader.Reload(); err != nil {
 				return err
@@ -196,11 +203,12 @@ func main() {
 		})
 	}
 
-	log.Printf("Listening on http://%s", opts.listen)
+	slog.Info("listening", "addr", opts.listen)
 	if err := srv.ListenAndServe(ctx, opts.listen); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
+		return err
 	}
-	log.Print("Shutdown complete")
+	slog.Info("shutdown complete")
+	return nil
 }
 
 func prefixList(prefixes []netip.Prefix) string {
@@ -234,30 +242,31 @@ func serverConfig(opts *options) server.Config {
 		IPHeaders:      opts.headers,
 		TrustedProxies: opts.trustedProxies,
 		Profile:        opts.profile,
+		City:           opts.cityFile != "",
+		ASN:            opts.asnFile != "",
 	}
 
 	if opts.reverseLookup {
-		log.Print("Enabling reverse lookup")
+		slog.Info("reverse lookup enabled")
 		cfg.LookupAddr = iputil.LookupAddr
 	}
 
 	if len(opts.headers) > 0 {
-		log.Printf("Trusting remote IP from header(s): %s", strings.Join(opts.headers, ", "))
+		headers := strings.Join(opts.headers, ", ")
 		if len(opts.trustedProxies) == 0 {
-			log.Print("Any caller can set those headers. Set -T to limit them to the proxy")
+			slog.Warn("any caller can set the trusted headers, set -T to limit them to the proxy", "headers", headers)
 		} else {
-			log.Printf("Headers are only read from: %s", prefixList(opts.trustedProxies))
+			slog.Info("trusting headers from proxies", "headers", headers, "proxies", prefixList(opts.trustedProxies))
 		}
 	}
 
 	if opts.cacheSize > 0 {
-		log.Printf("Cache capacity set to %d", opts.cacheSize)
+		slog.Info("cache enabled", "capacity", opts.cacheSize)
 	}
 
 	if opts.profile {
-		log.Printf("Enabling profiling handlers on /debug. They are not "+
-			"authenticated and expose memory contents, so %s must not be "+
-			"reachable from the internet while they are on", opts.listen)
+		slog.Warn("profiling handlers on /debug are unauthenticated and expose memory contents, "+
+			"keep the listen address off the internet", "addr", opts.listen)
 	}
 
 	return cfg

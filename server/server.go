@@ -1,3 +1,5 @@
+// Package server answers HTTP requests with the address of the caller and what
+// the GeoIP databases know about it.
 package server
 
 import (
@@ -25,12 +27,17 @@ var csp = contentSecurityPolicy()
 const (
 	jsonMediaType = "application/json"
 	textMediaType = "text/plain"
+	htmlMediaType = "text/html"
 
+	problemMediaType = "application/problem+json"
+
+	textContentType = "text/plain; charset=utf-8"
 	htmlContentType = "text/html; charset=utf-8"
 
-	// The template rendered for browsers. The other files beside it are
-	// included from it.
+	// The templates rendered for browsers. The other files beside them are
+	// included from them.
 	indexTemplate = "index.html"
+	errorTemplate = "error.html"
 )
 
 // Timeouts that keep a stalled or idle client from holding a connection.
@@ -59,67 +66,83 @@ type Config struct {
 	TrustedProxies []netip.Prefix
 	// LookupAddr resolves the hostname of an address. Nil leaves the hostname
 	// out of the response.
-	LookupAddr func(netip.Addr) (string, error)
+	LookupAddr func(context.Context, netip.Addr) (string, error)
 	// Profile registers the cache and pprof handlers below /debug.
 	Profile bool
+	// City and ASN register the endpoints that need that database. They
+	// answer 503 until it is loaded.
+	City bool
+	ASN  bool
 }
 
+// GeoReader looks up GeoIP records. The Has methods report which lookups the
+// databases currently loaded can answer, the Built methods when MaxMind built
+// them.
+type GeoReader interface {
+	City(netip.Addr) (geo.City, error)
+	ASN(netip.Addr) (geo.ASN, error)
+	HasCity() bool
+	HasASN() bool
+	CityBuilt() time.Time
+	ASNBuilt() time.Time
+}
+
+// Server serves the address and GeoIP data of the caller.
 type Server struct {
 	cfg   Config
 	cache *Cache
-	geo   geo.Reader
+	geo   GeoReader
 }
 
-func New(cfg Config, geoReader geo.Reader, cache *Cache) *Server {
+// New returns a server that looks up addresses in geoReader and keeps the
+// answers in cache.
+func New(cfg Config, geoReader GeoReader, cache *Cache) *Server {
 	return &Server{cfg: cfg, geo: geoReader, cache: cache}
 }
 
-// hasCity and hasASN are checked per request, because the databases may be
-// downloaded after the server starts.
-func (s *Server) hasCity(*http.Request) bool { return s.geo.HasCity() }
-func (s *Server) hasASN(*http.Request) bool  { return s.geo.HasASN() }
-
+// Handler returns the routes with the security and cache headers every
+// response carries.
 func (s *Server) Handler() http.Handler {
-	r := NewRouter()
+	r := newRouter()
 
-	r.Route("GET", "/health", s.healthHandler)
+	r.Route(http.MethodGet, "/", s.rootHandler)
+	r.Route(http.MethodGet, "/health", s.healthHandler).Format(jsonFormat)
+	r.Route(http.MethodGet, "/json", s.jsonHandler).Format(jsonFormat)
+	r.Route(http.MethodGet, "/ip", s.ipHandler).Format(textFormat)
 
-	r.Route("GET", "/", s.jsonHandler).Accept(jsonMediaType)
-	r.Route("GET", "/json", s.jsonHandler)
-
-	r.Route("GET", "/", s.ipHandler).MatcherFunc(cliMatcher)
-	r.Route("GET", "/", s.ipHandler).Accept(textMediaType)
-	r.Route("GET", "/ip", s.ipHandler)
-
-	r.Route("GET", "/country", s.cliField(func(r Response) string { return r.Country })).MatcherFunc(s.hasCity)
-	r.Route("GET", "/country-iso", s.cliField(func(r Response) string { return r.CountryISO })).MatcherFunc(s.hasCity)
-	r.Route("GET", "/city", s.cliField(func(r Response) string { return r.City })).MatcherFunc(s.hasCity)
-	r.Route("GET", "/coordinates", s.cliField(Response.Coordinates)).MatcherFunc(s.hasCity)
-	r.Route("GET", "/asn", s.cliField(func(r Response) string { return r.ASN })).MatcherFunc(s.hasASN)
-	r.Route("GET", "/asn-org", s.cliField(func(r Response) string { return r.ASNOrg })).MatcherFunc(s.hasASN)
-
-	r.Route("GET", "/", s.browserHandler)
-
-	if s.cfg.Profile {
-		r.Route("POST", "/debug/cache/resize", s.cacheResizeHandler)
-		r.Route("GET", "/debug/cache/", s.cacheHandler)
-		r.Route("GET", "/debug/pprof/cmdline", wrapHandlerFunc(pprof.Cmdline))
-		r.Route("GET", "/debug/pprof/profile", wrapHandlerFunc(pprof.Profile))
-		r.Route("GET", "/debug/pprof/symbol", wrapHandlerFunc(pprof.Symbol))
-		r.Route("GET", "/debug/pprof/trace", wrapHandlerFunc(pprof.Trace))
-		r.RoutePrefix("GET", "/debug/pprof/", wrapHandlerFunc(pprof.Index))
+	if s.cfg.City {
+		for _, ep := range cityEndpoints {
+			r.Route(http.MethodGet, "/"+ep.path, s.cityField(ep.field)).Format(textFormat)
+		}
+	}
+	if s.cfg.ASN {
+		for _, ep := range asnEndpoints {
+			r.Route(http.MethodGet, "/"+ep.path, s.asnField(ep.field)).Format(textFormat)
+		}
 	}
 
-	return withSecurityHeaders(csp, r.Handler())
+	if s.cfg.Profile {
+		r.Route(http.MethodPost, "/debug/cache/resize", s.cacheResizeHandler).Format(jsonFormat)
+		r.Route(http.MethodGet, "/debug/cache/", s.cacheHandler).Format(jsonFormat)
+		r.Route(http.MethodGet, "/debug/pprof/cmdline", wrapHandlerFunc(pprof.Cmdline))
+		r.Route(http.MethodGet, "/debug/pprof/profile", wrapHandlerFunc(pprof.Profile))
+		r.Route(http.MethodGet, "/debug/pprof/symbol", wrapHandlerFunc(pprof.Symbol))
+		r.Route(http.MethodGet, "/debug/pprof/trace", wrapHandlerFunc(pprof.Trace))
+		r.RoutePrefix(http.MethodGet, "/debug/pprof/", wrapHandlerFunc(pprof.Index))
+	}
+
+	return withHeaders(csp, s.logRefused(recoverPanic(r.Handler())))
 }
 
-func withSecurityHeaders(csp string, next http.Handler) http.Handler {
+func withHeaders(csp string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
 		for name, value := range securityHeaders {
 			header.Set(name, value)
 		}
 		header.Set("Content-Security-Policy", csp)
+		// The answer on / depends on both, a 404 on Accept.
+		header.Set("Vary", "Accept, User-Agent")
 		next.ServeHTTP(w, r)
 	})
 }

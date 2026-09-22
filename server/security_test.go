@@ -2,7 +2,6 @@ package server
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,16 +9,23 @@ import (
 )
 
 // The browser hashes exactly what it receives, so a template change the policy
-// does not cover would silently disable the page.
+// does not cover would silently disable the page. The error page is checked
+// the same way.
 func TestContentSecurityPolicyCoversPage(t *testing.T) {
-	log.SetOutput(io.Discard)
-
-	server := New(Config{}, &testDb{}, NewCache(0))
+	server := New(Config{}, &testDB{}, NewCache(0))
 
 	s := httptest.NewServer(server.Handler())
 	defer s.Close()
 
-	req, err := http.NewRequest(http.MethodGet, s.URL, nil)
+	for _, path := range []string{"/", "/nowhere"} {
+		t.Run(path, func(t *testing.T) {
+			checkPolicyCovers(t, s.URL+path)
+		})
+	}
+}
+
+func checkPolicyCovers(t *testing.T, url string) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +72,6 @@ func TestContentSecurityPolicyCoversPage(t *testing.T) {
 }
 
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
-	log.SetOutput(io.Discard)
 	s := httptest.NewServer(testServer().Handler())
 	defer s.Close()
 
@@ -84,6 +89,9 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 		}
 		if res.Header.Get("Content-Security-Policy") == "" {
 			t.Errorf("%s: missing Content-Security-Policy", path)
+		}
+		if got := res.Header.Get("Vary"); got != "Accept, User-Agent" {
+			t.Errorf("%s: Vary = %q, want %q", path, got, "Accept, User-Agent")
 		}
 	}
 }
