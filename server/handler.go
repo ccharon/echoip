@@ -122,8 +122,8 @@ func wrapHandlerFunc(f http.HandlerFunc) appHandler {
 
 // writeRaw writes without a trailing newline. A failed write means the client
 // is gone, which is only worth a log line.
-func writeRaw(w http.ResponseWriter, s string) {
-	if _, err := io.WriteString(w, s); err != nil {
+func writeRaw(w http.ResponseWriter, b []byte) {
+	if _, err := w.Write(b); err != nil {
 		slog.Info("writing response failed", "error", err)
 	}
 }
@@ -131,7 +131,7 @@ func writeRaw(w http.ResponseWriter, s string) {
 // writeLine answers with one line of plain text.
 func writeLine(w http.ResponseWriter, s string) {
 	w.Header().Set("Content-Type", textContentType)
-	writeRaw(w, s+"\n")
+	writeRaw(w, []byte(s+"\n"))
 }
 
 func writeJSON(w http.ResponseWriter, v any) *appError {
@@ -140,13 +140,9 @@ func writeJSON(w http.ResponseWriter, v any) *appError {
 		return internal(err)
 	}
 	w.Header().Set("Content-Type", jsonMediaType)
-	writeRaw(w, string(b))
+	writeRaw(w, b)
 	return nil
 }
-
-// retryAfter is the delay after which the updater tries a missing database
-// again, in seconds.
-const retryAfter = "900"
 
 // fieldEndpoint is a text endpoint that answers one field of the response.
 // The page offers the same ones as buttons.
@@ -167,33 +163,59 @@ var asnEndpoints = []fieldEndpoint{
 	{"asn-org", func(r Response) string { return r.ASNOrg }},
 }
 
-func (s *Server) cityField(field func(Response) string) appHandler {
-	return s.cliField("city", func() bool { return s.geo.HasCity() }, field)
+// database is a configured GeoIP database and the field endpoints it answers.
+type database struct {
+	name      string
+	loaded    func() bool
+	endpoints []fieldEndpoint
 }
 
-func (s *Server) asnField(field func(Response) string) appHandler {
-	return s.cliField("ASN", func() bool { return s.geo.HasASN() }, field)
+// databases lists the configured databases for the routes and the page.
+func (s *Server) databases() []database {
+	var dbs []database
+	if s.cfg.City {
+		dbs = append(dbs, database{"city", s.geo.CityLoaded, cityEndpoints})
+	}
+	if s.cfg.ASN {
+		dbs = append(dbs, database{"ASN", s.geo.ASNLoaded, asnEndpoints})
+	}
+	return dbs
 }
 
-func notLoaded(database string) string {
-	return "The " + database + " database is not loaded yet."
+// unavailable returns why the endpoints answer 503, or nothing while loaded.
+func (db database) unavailable() string {
+	if db.loaded() {
+		return ""
+	}
+	return "The " + db.name + " database is not loaded yet."
 }
 
 // cliField answers with a single field of the response, one line of text. The
 // database it comes from is checked per request, because it may be downloaded
 // after the server starts.
-func (s *Server) cliField(database string, loaded func() bool, field func(Response) string) appHandler {
+func (s *Server) cliField(db database, field func(Response) string) appHandler {
 	return func(w http.ResponseWriter, r *http.Request) *appError {
-		if !loaded() {
-			w.Header().Set("Retry-After", retryAfter)
-			return newError(databaseUnavailable, notLoaded(database))
+		if reason := db.unavailable(); reason != "" {
+			s.setRetryAfter(w)
+			return newError(databaseUnavailable, reason)
 		}
-		response, e := s.newResponse(r)
+		response, e := s.newResponse(r, false)
 		if e != nil {
 			return e
 		}
 		writeLine(w, field(response))
 		return nil
+	}
+}
+
+// setRetryAfter rounds up, so a client does not come back before the attempt.
+func (s *Server) setRetryAfter(w http.ResponseWriter) {
+	if s.cfg.NextCheck == nil {
+		return
+	}
+	if wait := time.Until(s.cfg.NextCheck()); wait > 0 {
+		seconds := (wait + time.Second - 1) / time.Second
+		w.Header().Set("Retry-After", strconv.Itoa(int(seconds)))
 	}
 }
 
@@ -221,7 +243,7 @@ func (s *Server) ipHandler(w http.ResponseWriter, r *http.Request) *appError {
 }
 
 func (s *Server) jsonHandler(w http.ResponseWriter, r *http.Request) *appError {
-	response, e := s.newResponse(r)
+	response, e := s.newResponse(r, true)
 	if e != nil {
 		return e
 	}
@@ -230,17 +252,12 @@ func (s *Server) jsonHandler(w http.ResponseWriter, r *http.Request) *appError {
 
 func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) *appError {
 	w.Header().Set("Content-Type", jsonMediaType)
-	writeRaw(w, `{"status":"OK"}`)
+	writeRaw(w, []byte(`{"status":"OK"}`))
 	return nil
 }
 
 func (s *Server) cacheHandler(w http.ResponseWriter, _ *http.Request) *appError {
-	stats := s.cache.stats()
-	return writeJSON(w, struct {
-		Size      int    `json:"size"`
-		Capacity  int    `json:"capacity"`
-		Evictions uint64 `json:"evictions"`
-	}{stats.Size, stats.Capacity, stats.Evictions})
+	return writeJSON(w, s.cache.stats())
 }
 
 func (s *Server) cacheResizeHandler(w http.ResponseWriter, r *http.Request) *appError {
@@ -272,7 +289,7 @@ func readCapacity(body io.Reader) (int, error) {
 
 // browserHandler renders the HTML page.
 func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *appError {
-	response, e := s.newResponse(r)
+	response, e := s.newResponse(r, true)
 	if e != nil {
 		return e
 	}
@@ -306,9 +323,7 @@ func (s *Server) browserHandler(w http.ResponseWriter, r *http.Request) *appErro
 	// Set explicitly rather than left to content sniffing, which the nosniff
 	// header tells the browser to ignore.
 	w.Header().Set("Content-Type", htmlContentType)
-	if _, err := page.WriteTo(w); err != nil {
-		slog.Info("writing response failed", "error", err)
-	}
+	writeRaw(w, page.Bytes())
 
 	return nil
 }
@@ -342,25 +357,13 @@ type chip struct {
 // to a 404.
 func (s *Server) chips(response Response) []chip {
 	var chips []chip
-	add := func(endpoints []fieldEndpoint, unavailable string) {
-		for _, ep := range endpoints {
+	for _, db := range s.databases() {
+		unavailable := db.unavailable()
+		for _, ep := range db.endpoints {
 			chips = append(chips, chip{Path: ep.path, Value: ep.field(response), Unavailable: unavailable})
 		}
 	}
-	if s.cfg.City {
-		add(cityEndpoints, unlessLoaded(s.geo.HasCity(), "city"))
-	}
-	if s.cfg.ASN {
-		add(asnEndpoints, unlessLoaded(s.geo.HasASN(), "ASN"))
-	}
 	return chips
-}
-
-func unlessLoaded(loaded bool, database string) string {
-	if loaded {
-		return ""
-	}
-	return notLoaded(database)
 }
 
 // geoBuilt names when MaxMind built the databases that are loaded, for the

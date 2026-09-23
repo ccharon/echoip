@@ -28,8 +28,8 @@ func (t *testDB) ASN(netip.Addr) (geo.ASN, error) {
 	return geo.ASN{AutonomousSystemNumber: 59795, AutonomousSystemOrganization: "Hosting4Real"}, nil
 }
 
-func (t *testDB) HasCity() bool { return true }
-func (t *testDB) HasASN() bool  { return true }
+func (t *testDB) CityLoaded() bool { return true }
+func (t *testDB) ASNLoaded() bool  { return true }
 
 func (t *testDB) CityBuilt() time.Time { return time.Date(2026, 9, 18, 4, 49, 38, 0, time.UTC) }
 func (t *testDB) ASNBuilt() time.Time  { return time.Date(2026, 9, 19, 8, 15, 24, 0, time.UTC) }
@@ -42,13 +42,13 @@ type pendingDB struct {
 	asn  bool
 }
 
-func (t *pendingDB) HasCity() bool { return t.city }
-func (t *pendingDB) HasASN() bool  { return t.asn }
+func (t *pendingDB) CityLoaded() bool { return t.city }
+func (t *pendingDB) ASNLoaded() bool  { return t.asn }
 
 const notFoundJSON = "{\n  \"type\": \"https://github.com/ccharon/echoip#not-found\",\n  \"title\": \"Not found\",\n  \"status\": 404,\n  \"detail\": \"No endpoint answers at this path.\"\n}"
 
 func testServer() *Server {
-	cfg := Config{LookupAddr: lookupAddr, City: true, ASN: true}
+	cfg := Config{LookupAddr: lookupAddr, City: true, ASN: true, NextCheck: func() time.Time { return time.Now().Add(15 * time.Minute) }}
 	return New(cfg, &testDB{}, NewCache(100))
 }
 
@@ -503,8 +503,8 @@ func TestGeoHandlersFollowDatabase(t *testing.T) {
 	if res.StatusCode != 503 {
 		t.Errorf("Expected 503 for /country while the database is missing, got %d", res.StatusCode)
 	}
-	if got := res.Header.Get("Retry-After"); got != retryAfter {
-		t.Errorf("Expected Retry-After %s, got %q", retryAfter, got)
+	if got := res.Header.Get("Retry-After"); got != "900" {
+		t.Errorf("Expected Retry-After 900, got %q", got)
 	}
 	if want := "error: The city database is not loaded yet.\n"; out != want {
 		t.Errorf("Expected %q, got %q", want, out)
@@ -798,7 +798,7 @@ func TestPanicAnswersInternalError(t *testing.T) {
 func TestPanicAfterWriteDropsConnection(t *testing.T) {
 	captureLog(t)
 	h := recoverPanic(func(w http.ResponseWriter, _ *http.Request) *appError {
-		writeRaw(w, "partial")
+		writeRaw(w, []byte("partial"))
 		panic("boom")
 	})
 	s := httptest.NewServer(h)
@@ -840,5 +840,29 @@ func TestPageOffersRegisteredEndpoints(t *testing.T) {
 		if strings.Contains(out, `data-path="`+ep.path+`"`) {
 			t.Errorf("expected no button for /%s, which is not registered", ep.path)
 		}
+	}
+}
+
+// Retry-After rounds up and is left out without an updater or during a check.
+func TestSetRetryAfter(t *testing.T) {
+	tests := []struct {
+		name      string
+		nextCheck func() time.Time
+		want      string
+	}{
+		{"no updater", nil, ""},
+		{"check running", func() time.Time { return time.Now().Add(-time.Second) }, ""},
+		{"rounded up", func() time.Time { return time.Now().Add(90*time.Second + 500*time.Millisecond) }, "91"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{cfg: Config{NextCheck: tt.nextCheck}}
+			w := httptest.NewRecorder()
+			s.setRetryAfter(w)
+			if got := w.Header().Get("Retry-After"); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

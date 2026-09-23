@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -72,13 +71,6 @@ func inlineBlocks() []inlineContent {
 		blocks = append(blocks, inlineContent{tag: match[1], content: match[2]})
 	}
 	return blocks
-}
-
-func appendOnce(sources []string, source string) []string {
-	if slices.Contains(sources, source) {
-		return sources
-	}
-	return append(sources, source)
 }
 
 func sources(hashes []string) string {

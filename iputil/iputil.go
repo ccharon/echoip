@@ -57,8 +57,7 @@ func Public(addr netip.Addr) bool {
 	addr = addr.Unmap()
 
 	if addr.IsUnspecified() || addr.IsLoopback() || addr.IsPrivate() ||
-		addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
-		addr.IsInterfaceLocalMulticast() || addr.IsMulticast() {
+		addr.IsLinkLocalUnicast() || addr.IsMulticast() {
 		return false
 	}
 	for _, prefix := range notGloballyReachable {

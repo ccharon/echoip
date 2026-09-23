@@ -48,7 +48,7 @@ func TestCancelledLookupIsNotCached(t *testing.T) {
 	cancel()
 	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/json", nil)
 
-	response, err := srv.newResponse(req)
+	response, err := srv.newResponse(req, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,11 +59,45 @@ func TestCancelledLookupIsNotCached(t *testing.T) {
 		t.Errorf("expected nothing cached, got %d entries", size)
 	}
 
-	response, err = srv.newResponse(httptest.NewRequest(http.MethodGet, "/json", nil))
+	response, err = srv.newResponse(httptest.NewRequest(http.MethodGet, "/json", nil), true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if response.Hostname != "localhost" {
 		t.Errorf("expected the hostname on the next request, got %q", response.Hostname)
+	}
+}
+
+// A field endpoint skips the reverse lookup and leaves its response uncached.
+func TestFieldEndpointSkipsReverseLookup(t *testing.T) {
+	lookups := 0
+	cfg := Config{City: true, LookupAddr: func(context.Context, netip.Addr) (string, error) {
+		lookups++
+		return "localhost", nil
+	}}
+	srv := New(cfg, &testDB{}, NewCache(10))
+	h := srv.Handler()
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/country", nil))
+	if lookups != 0 {
+		t.Errorf("expected no reverse lookup for /country, got %d", lookups)
+	}
+	if size := srv.cache.stats().Size; size != 0 {
+		t.Errorf("expected nothing cached after /country, got %d entries", size)
+	}
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/json", nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/country", nil))
+	if lookups != 1 {
+		t.Errorf("expected one reverse lookup for /json, got %d", lookups)
+	}
+}
+
+// Without a resolver a field endpoint's response is complete and is cached.
+func TestFieldEndpointCachesWithoutResolver(t *testing.T) {
+	srv := New(Config{City: true}, &testDB{}, NewCache(10))
+	srv.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/country", nil))
+	if size := srv.cache.stats().Size; size != 1 {
+		t.Errorf("expected the response cached, got %d entries", size)
 	}
 }

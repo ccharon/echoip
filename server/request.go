@@ -28,7 +28,7 @@ var cliProducts = map[string]bool{
 	"xh":             true,
 }
 
-func cliMatcher(r *http.Request) bool {
+func isCLI(r *http.Request) bool {
 	return cliProducts[useragent.Parse(r.UserAgent()).Product]
 }
 
@@ -52,7 +52,7 @@ func negotiateFormat(r *http.Request) format {
 	case textMediaType:
 		return textFormat
 	}
-	if cliMatcher(r) {
+	if isCLI(r) {
 		return textFormat
 	}
 	return htmlFormat
@@ -114,10 +114,8 @@ var qvalue = regexp.MustCompile(`^(?:0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)$`)
 func (s *Server) ipFromRequest(r *http.Request) (netip.Addr, *appError) {
 	peer, peerErr := peerAddr(r)
 
-	if r.URL != nil {
-		if v := r.URL.Query().Get("ip"); v != "" {
-			return suppliedAddr(v)
-		}
+	if v := r.URL.Query().Get("ip"); v != "" {
+		return suppliedAddr(v)
 	}
 
 	if v := s.forwarded(r, peer); v != "" {

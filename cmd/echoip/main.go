@@ -189,7 +189,7 @@ func run(opts *options) error {
 	}
 
 	cache := server.NewCache(opts.cacheSize)
-	srv := server.New(serverConfig(opts), geoReader, cache)
+	cfg := serverConfig(opts)
 
 	if updater.Enabled() {
 		slog.Info("checking GeoIP databases periodically", "interval", updater.Interval)
@@ -201,7 +201,10 @@ func run(opts *options) error {
 			cache.Clear()
 			return nil
 		})
+		cfg.NextCheck = updater.NextCheck
 	}
+
+	srv := server.New(cfg, geoReader, cache)
 
 	slog.Info("listening", "addr", opts.listen)
 	if err := srv.ListenAndServe(ctx, opts.listen); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -223,7 +226,7 @@ func prefixList(prefixes []netip.Prefix) string {
 // not have. An updater that never runs needs none, which leaves the database
 // files to whatever put them there.
 func missingCredential(u *maxmind.Updater) string {
-	if len(u.Databases) == 0 || u.Interval <= 0 {
+	if !u.Scheduled() {
 		return ""
 	}
 	if u.AccountID == "" {

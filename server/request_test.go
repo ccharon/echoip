@@ -112,7 +112,7 @@ func TestIPFromRequestAllowsPrivatePeer(t *testing.T) {
 	}
 }
 
-func TestCLIMatcher(t *testing.T) {
+func TestIsCLI(t *testing.T) {
 	browserUserAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_4) " +
 		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.28 " +
 		"Safari/537.36"
@@ -135,7 +135,7 @@ func TestCLIMatcher(t *testing.T) {
 	}
 	for _, tt := range tests {
 		r := &http.Request{Header: http.Header{"User-Agent": []string{tt.in}}}
-		if got := cliMatcher(r); got != tt.out {
+		if got := isCLI(r); got != tt.out {
 			t.Errorf("Expected %t, got %t for %q", tt.out, got, tt.in)
 		}
 	}
@@ -210,10 +210,10 @@ func TestTrustedProxies(t *testing.T) {
 		}
 
 		server := &Server{cfg: Config{IPHeaders: []string{"X-Real-IP"}, TrustedProxies: trusted}}
-		// No URL, so nothing reaches the ?ip= branch and the header decides.
 		r := &http.Request{
 			RemoteAddr: tt.peer,
 			Header:     http.Header{"X-Real-Ip": []string{"1.3.3.7"}},
+			URL:        &url.URL{Path: "/"},
 		}
 
 		addr, e := server.ipFromRequest(r)

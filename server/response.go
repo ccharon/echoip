@@ -44,8 +44,8 @@ func formatCoordinate(c float64) string {
 	return strconv.FormatFloat(c, 'f', 6, 64)
 }
 
-// newResponse answers from the cache when the address is known.
-func (s *Server) newResponse(r *http.Request) (Response, *appError) {
+// newResponse answers from the cache, which holds complete responses only.
+func (s *Server) newResponse(r *http.Request, hostname bool) (Response, *appError) {
 	addr, e := s.ipFromRequest(r)
 	if e != nil {
 		return Response{}, e
@@ -53,9 +53,10 @@ func (s *Server) newResponse(r *http.Request) (Response, *appError) {
 
 	response, cached := s.cache.get(addr)
 	if !cached {
-		response = s.lookup(r.Context(), addr)
+		complete := hostname || s.cfg.LookupAddr == nil
+		response = s.lookup(r.Context(), addr, complete)
 		// A client that left may have cut the reverse lookup short.
-		if r.Context().Err() == nil {
+		if complete && r.Context().Err() == nil {
 			s.cache.set(addr, response)
 		}
 	}
@@ -67,10 +68,10 @@ func (s *Server) newResponse(r *http.Request) (Response, *appError) {
 	return response, nil
 }
 
-// lookup gathers what the databases and the resolver know about addr. A lookup
-// that fails leaves its fields empty, which is what a missing database gives
-// as well.
-func (s *Server) lookup(ctx context.Context, addr netip.Addr) Response {
+// lookup gathers what the databases and, with hostname, the resolver know
+// about addr. A lookup that fails leaves its fields empty, which is what a
+// missing database gives as well.
+func (s *Server) lookup(ctx context.Context, addr netip.Addr, hostname bool) Response {
 	// An address the database does not hold is no error, so a failure here
 	// means the file itself is unreadable and the operator wants to know.
 	city, err := s.geo.City(addr)
@@ -82,9 +83,9 @@ func (s *Server) lookup(ctx context.Context, addr netip.Addr) Response {
 		slog.Error("ASN lookup failed", "ip", addr, "error", err)
 	}
 
-	var hostname string
-	if s.cfg.LookupAddr != nil {
-		hostname, _ = s.cfg.LookupAddr(ctx, addr)
+	var name string
+	if hostname && s.cfg.LookupAddr != nil {
+		name, _ = s.cfg.LookupAddr(ctx, addr)
 	}
 
 	var asnumber string
@@ -106,6 +107,6 @@ func (s *Server) lookup(ctx context.Context, addr netip.Addr) Response {
 		Timezone:   city.Timezone,
 		ASN:        asnumber,
 		ASNOrg:     asn.AutonomousSystemOrganization,
-		Hostname:   hostname,
+		Hostname:   name,
 	}
 }

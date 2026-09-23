@@ -52,8 +52,8 @@ func TestReloadDuringLookups(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					d.HasCity()
-					d.HasASN()
+					d.CityLoaded()
+					d.ASNLoaded()
 				}
 			}
 		})
@@ -74,7 +74,7 @@ func TestOpenMissingDatabase(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if d.HasCity() || d.HasASN() {
+	if d.CityLoaded() || d.ASNLoaded() {
 		t.Error("expected no database to be in use")
 	}
 	if _, err := d.City(netip.MustParseAddr("8.8.8.8")); err != nil {
@@ -97,10 +97,10 @@ func TestReloadAfterMissingDatabase(t *testing.T) {
 	}
 
 	// The database that did open is in use, although the other one failed.
-	if d.HasCity() {
+	if d.CityLoaded() {
 		t.Error("expected no city database")
 	}
-	if !d.HasASN() {
+	if !d.ASNLoaded() {
 		t.Error("expected the ASN database to be in use")
 	}
 
@@ -108,7 +108,7 @@ func TestReloadAfterMissingDatabase(t *testing.T) {
 	if err := d.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	if !d.HasCity() || !d.HasASN() {
+	if !d.CityLoaded() || !d.ASNLoaded() {
 		t.Fatal("expected both databases to be in use")
 	}
 
