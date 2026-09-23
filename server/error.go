@@ -80,7 +80,7 @@ func (e *appError) write(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(e.problem.status)
-	writeRaw(w, string(body))
+	writeRaw(w, body)
 }
 
 // json renders problem details as in RFC 9457.

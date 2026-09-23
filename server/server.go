@@ -73,16 +73,18 @@ type Config struct {
 	// answer 503 until it is loaded.
 	City bool
 	ASN  bool
+	// NextCheck names the next download attempt in Retry-After. Nil leaves it out.
+	NextCheck func() time.Time
 }
 
-// GeoReader looks up GeoIP records. The Has methods report which lookups the
-// databases currently loaded can answer, the Built methods when MaxMind built
-// them.
+// GeoReader looks up GeoIP records. The Loaded methods report whether the
+// database file is open, whatever it holds for a given address. The Built
+// methods report when MaxMind built it.
 type GeoReader interface {
 	City(netip.Addr) (geo.City, error)
 	ASN(netip.Addr) (geo.ASN, error)
-	HasCity() bool
-	HasASN() bool
+	CityLoaded() bool
+	ASNLoaded() bool
 	CityBuilt() time.Time
 	ASNBuilt() time.Time
 }
@@ -110,14 +112,9 @@ func (s *Server) Handler() http.Handler {
 	r.Route(http.MethodGet, "/json", s.jsonHandler).Format(jsonFormat)
 	r.Route(http.MethodGet, "/ip", s.ipHandler).Format(textFormat)
 
-	if s.cfg.City {
-		for _, ep := range cityEndpoints {
-			r.Route(http.MethodGet, "/"+ep.path, s.cityField(ep.field)).Format(textFormat)
-		}
-	}
-	if s.cfg.ASN {
-		for _, ep := range asnEndpoints {
-			r.Route(http.MethodGet, "/"+ep.path, s.asnField(ep.field)).Format(textFormat)
+	for _, db := range s.databases() {
+		for _, ep := range db.endpoints {
+			r.Route(http.MethodGet, "/"+ep.path, s.cliField(db, ep.field)).Format(textFormat)
 		}
 	}
 

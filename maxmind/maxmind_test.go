@@ -325,14 +325,14 @@ func TestEnabled(t *testing.T) {
 
 	var tests = []struct {
 		name string
-		u    Updater
+		u    *Updater
 		want bool
 	}{
-		{"complete", Updater{AccountID: "1", LicenseKey: "k", Interval: time.Hour, Databases: databases}, true},
-		{"no account", Updater{LicenseKey: "k", Interval: time.Hour, Databases: databases}, false},
-		{"no key", Updater{AccountID: "1", Interval: time.Hour, Databases: databases}, false},
-		{"no interval", Updater{AccountID: "1", LicenseKey: "k", Databases: databases}, false},
-		{"no databases", Updater{AccountID: "1", LicenseKey: "k", Interval: time.Hour}, false},
+		{"complete", &Updater{AccountID: "1", LicenseKey: "k", Interval: time.Hour, Databases: databases}, true},
+		{"no account", &Updater{LicenseKey: "k", Interval: time.Hour, Databases: databases}, false},
+		{"no key", &Updater{AccountID: "1", Interval: time.Hour, Databases: databases}, false},
+		{"no interval", &Updater{AccountID: "1", LicenseKey: "k", Databases: databases}, false},
+		{"no databases", &Updater{AccountID: "1", LicenseKey: "k", Interval: time.Hour}, false},
 	}
 
 	for _, tt := range tests {
@@ -480,19 +480,29 @@ func TestNextRefreshCountsFromDatabaseAge(t *testing.T) {
 	}
 }
 
-func TestRunStopsWithoutInterval(t *testing.T) {
-	u := &Updater{AccountID: "12345", LicenseKey: "secret", Databases: map[string]string{EditionASN: "unused"}}
+func TestRunStopsWhenNotScheduled(t *testing.T) {
+	tests := []struct {
+		name string
+		u    *Updater
+	}{
+		{"no interval", &Updater{AccountID: "12345", LicenseKey: "secret", Databases: map[string]string{EditionASN: "unused"}}},
+		{"no databases", &Updater{AccountID: "12345", LicenseKey: "secret", Interval: time.Hour}},
+	}
 
-	done := make(chan struct{})
-	go func() {
-		u.Run(context.Background(), func() error { return nil })
-		close(done)
-	}()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			done := make(chan struct{})
+			go func() {
+				tt.u.Run(context.Background(), func() error { return nil })
+				close(done)
+			}()
 
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not return for an interval of zero")
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Run did not return")
+			}
+		})
 	}
 }
 
@@ -760,8 +770,8 @@ func TestChecksumErrorHidesLicenseKey(t *testing.T) {
 	}
 }
 
-// The license key is a query parameter, so a redirect that changes the scheme
-// would hand it to whoever answers.
+// The credentials and the signed URL a redirect leads to must not travel in
+// plain text, so a redirect that changes the scheme is refused.
 func TestUpdateRefusesSchemeChange(t *testing.T) {
 	// A working https target, so the refusal is about the scheme and not about
 	// the certificate.
@@ -886,7 +896,7 @@ func TestRefreshLoadsWhatWasDownloadedBeforeAnError(t *testing.T) {
 	// The editions are downloaded in sorted order, so ASN is in place when
 	// City fails.
 	reloads := 0
-	delay := u.refresh(t.Context(), func() error {
+	ok := u.refresh(t.Context(), func() error {
 		reloads++
 		return nil
 	})
@@ -897,12 +907,12 @@ func TestRefreshLoadsWhatWasDownloadedBeforeAnError(t *testing.T) {
 	if _, err := os.Stat(asnPath); err != nil {
 		t.Errorf("expected the ASN database on disk: %v", err)
 	}
-	if want := u.retryDelay(); delay != want {
-		t.Errorf("expected a retry after %s, got %s", want, delay)
+	if ok {
+		t.Error("expected the check to count as failed")
 	}
 }
 
-func TestRefreshRetriesWhenReloadFails(t *testing.T) {
+func TestRefreshFailsWhenReloadFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
 	defer srv.Close()
 
@@ -914,14 +924,13 @@ func TestRefreshRetriesWhenReloadFails(t *testing.T) {
 		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
 	}
 
-	// The download succeeds and the reload does not, so the next check comes
-	// sooner than a whole interval.
-	delay := u.refresh(t.Context(), func() error {
+	// The download succeeds and the reload does not, which is a failed check.
+	ok := u.refresh(t.Context(), func() error {
 		return errors.New("broken database")
 	})
 
-	if want := u.retryDelay(); delay != want {
-		t.Errorf("expected a retry after %s, got %s", want, delay)
+	if ok {
+		t.Error("expected the check to count as failed")
 	}
 }
 
@@ -946,12 +955,72 @@ func TestRefreshRetriesSoonerAfterAFailedCheck(t *testing.T) {
 		Databases:  map[string]string{EditionASN: path},
 	}
 
-	delay := u.refresh(t.Context(), func() error {
+	ok := u.refresh(t.Context(), func() error {
 		t.Error("expected no reload after a failed download")
 		return nil
 	})
+	if ok {
+		t.Fatal("expected the check to count as failed")
+	}
 
-	if want := u.retryDelay(); delay != want {
-		t.Errorf("expected a retry after %s, got %s", want, delay)
+	if want := u.retryDelay(); u.wait(afterFailure(0)) != want {
+		t.Errorf("expected a retry after %s, got %s", want, u.wait(afterFailure(0)))
+	}
+}
+
+// Two retries, then a whole interval, then a new round of retries.
+func TestWaitAfterFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
+	if err := os.WriteFile(path, []byte("current"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	u := &Updater{Interval: 24 * time.Hour, Databases: map[string]string{EditionASN: path}}
+
+	want := []time.Duration{retryInterval, retryInterval, 24 * time.Hour, retryInterval, retryInterval, 24 * time.Hour}
+	failures := 0
+	for i, w := range want {
+		failures = afterFailure(failures)
+		if got := u.wait(failures); got != w {
+			t.Errorf("failure %d: got %s, want %s", i+1, got, w)
+		}
+	}
+
+	// A success counts from the age of the databases again.
+	if got := u.wait(0); got < 23*time.Hour {
+		t.Errorf("after a success: got %s, want about %s", got, u.Interval)
+	}
+}
+
+// A database missing at the start makes the first check Run schedules a retry.
+func TestNextCheck(t *testing.T) {
+	u := &Updater{
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   24 * time.Hour,
+		Databases:  map[string]string{EditionASN: filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")},
+	}
+	if !u.NextCheck().IsZero() {
+		t.Fatal("expected no next check before Run")
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		u.Run(ctx, func() error { return nil })
+		close(done)
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for u.NextCheck().IsZero() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := time.Until(u.NextCheck()); got <= 0 || got > retryInterval {
+		t.Errorf("expected the next check within %s, got %s", retryInterval, got)
+	}
+
+	cancel()
+	<-done
+	if !u.NextCheck().IsZero() {
+		t.Error("expected no next check after Run returned")
 	}
 }

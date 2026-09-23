@@ -169,7 +169,8 @@ is not configured with `-c` or `-a` are absent as well.
 ### database-unavailable
 
 `503`. The database the endpoint needs is configured and not loaded yet.
-`Retry-After` names the seconds until the updater tries again.
+`Retry-After` names the seconds until the updater tries again. It is left
+out with `-u 0`, where no updater runs, and while a check is running.
 
 ### internal
 
@@ -237,8 +238,9 @@ Keep the listening address unreachable from the internet while they are on.
 - The refresh runs in process. A container that is restarted more often than
   the refresh interval downloads the databases again whenever the volume is
   empty.
-- A failed check is logged and retried after 15 minutes. The previously
-  downloaded databases stay in use.
+- A failed check is logged and retried twice, 30 minutes apart. After that
+  the next check follows the refresh interval. The previously downloaded
+  databases stay in use.
 - A database that is damaged after it was written is not downloaded again,
   because the conditional request still answers `304`. Every failed lookup is
   logged, so delete the file to force a download.
@@ -253,7 +255,7 @@ Keep the listening address unreachable from the internet while they are on.
 ```bash
 make lint test
 make vulncheck
-make run              # needs GEOIP_LICENSE_KEY
+make run              # needs MAXMIND_ACCOUNT_ID and GEOIP_LICENSE_KEY
 ```
 
 ## Release

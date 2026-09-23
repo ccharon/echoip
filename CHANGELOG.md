@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The field endpoints skip the reverse lookup, which they never report. With `-r` their answers stay out of the cache, so the next `/json` or page still gets the hostname.
+- `Retry-After` on the `503` from a field endpoint names the seconds until the updater's next attempt. It used to name a fixed 15 minutes. With `-u 0` and while a check is running, the header is left out.
+- A failed database check is retried twice, 30 minutes apart, and then waits for the refresh interval. It used to be retried every 15 minutes until it succeeded.
+- `geo.Database` and `server.GeoReader` name `HasCity` and `HasASN` `CityLoaded` and `ASNLoaded`. `server.Config.NextCheck` feeds `Retry-After`. `maxmind.Updater` gains `NextCheck` and `Scheduled`, holds an atomic value and is passed by pointer.
+
 ## 2.0.4 - 2026-09-23
 
 ### Breaking

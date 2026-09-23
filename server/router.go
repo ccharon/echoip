@@ -11,12 +11,11 @@ type router struct {
 }
 
 type route struct {
-	method      string
-	path        string
-	prefix      bool
-	handler     appHandler
-	matcherFunc func(*http.Request) bool
-	format      format
+	method  string
+	path    string
+	prefix  bool
+	handler appHandler
+	format  format
 }
 
 func newRouter() *router {
@@ -81,16 +80,18 @@ func (r *router) Handler() appHandler {
 // appendMethods adds method to allowed once, and HEAD after GET, because the
 // router answers HEAD with the GET handler.
 func appendMethods(allowed []string, method string) []string {
-	methods := []string{method}
+	allowed = appendOnce(allowed, method)
 	if method == http.MethodGet {
-		methods = append(methods, http.MethodHead)
-	}
-	for _, m := range methods {
-		if !slices.Contains(allowed, m) {
-			allowed = append(allowed, m)
-		}
+		allowed = appendOnce(allowed, http.MethodHead)
 	}
 	return allowed
+}
+
+func appendOnce(list []string, s string) []string {
+	if slices.Contains(list, s) {
+		return list
+	}
+	return append(list, s)
 }
 
 // Format sets what the route answers in, and with it what its failures come
@@ -100,22 +101,12 @@ func (r *route) Format(f format) *route {
 	return r
 }
 
-// MatcherFunc limits the route to requests that f accepts.
-func (r *route) MatcherFunc(f func(*http.Request) bool) *route {
-	r.matcherFunc = f
-	return r
-}
-
 // serves reports whether the route matches req apart from its method.
 func (r *route) serves(req *http.Request) bool {
 	if r.prefix {
-		if !strings.HasPrefix(req.URL.Path, r.path) {
-			return false
-		}
-	} else if r.path != req.URL.Path {
-		return false
+		return strings.HasPrefix(req.URL.Path, r.path)
 	}
-	return r.matcherFunc == nil || r.matcherFunc(req)
+	return r.path == req.URL.Path
 }
 
 // matchMethod reports whether the route answers the method of req. HEAD asks

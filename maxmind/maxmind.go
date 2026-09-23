@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -61,7 +62,10 @@ const (
 
 	// Delay until the next attempt when a database is missing or a refresh
 	// failed, so the server does not stay without data for a whole Interval.
-	retryInterval = 15 * time.Minute
+	retryInterval = 30 * time.Minute
+
+	// Retries before a failing check waits a whole Interval, to spare the quota.
+	maxRetries = 2
 )
 
 // Updater keeps GeoLite2 databases on disk current.
@@ -77,11 +81,19 @@ type Updater struct {
 
 	// endpoint replaces defaultEndpoint in tests.
 	endpoint string
+
+	// next is the time of the next check in Unix nanoseconds, zero while idle.
+	next atomic.Int64
+}
+
+// Scheduled reports whether there are databases to check periodically.
+func (u *Updater) Scheduled() bool {
+	return u.Interval > 0 && len(u.Databases) > 0
 }
 
 // Enabled reports whether this updater has everything it needs to download.
 func (u *Updater) Enabled() bool {
-	return u.AccountID != "" && u.LicenseKey != "" && u.Interval > 0 && len(u.Databases) > 0
+	return u.Scheduled() && u.AccountID != "" && u.LicenseKey != ""
 }
 
 // Stale reports whether any database is missing or older than Interval.
@@ -105,8 +117,8 @@ func (u *Updater) oldest() time.Duration {
 	return oldest
 }
 
-// nextRefresh returns how long to wait, counted from the age of the databases
-// so that a restart does not delay it.
+// nextRefresh counts from the age of the databases, so a restart does not
+// delay it. The retryDelay floor guards against a lost modification time.
 func (u *Updater) nextRefresh() time.Duration {
 	if remaining := u.Interval - u.oldest(); remaining > 0 {
 		return remaining
@@ -129,16 +141,21 @@ func (u *Updater) Update(ctx context.Context) (bool, error) {
 	return changed, nil
 }
 
-// Run checks the databases every Interval until ctx is done, and calls
-// onUpdate whenever a check brought new data. A failed check is retried after
-// retryDelay.
+// Run checks the databases every Interval until ctx is done and calls onUpdate
+// after new data. Databases still stale at the start count as a failed check,
+// because the caller has checked them once already.
 func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
-	if u.Interval <= 0 {
+	if !u.Scheduled() {
 		return
 	}
 
-	timer := time.NewTimer(u.nextRefresh())
+	failures := 0
+	if u.Stale() {
+		failures = 1
+	}
+	timer := time.NewTimer(u.schedule(u.wait(failures)))
 	defer timer.Stop()
+	defer u.next.Store(0)
 
 	for {
 		select {
@@ -147,12 +164,52 @@ func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 		case <-timer.C:
 		}
 
-		timer.Reset(u.refresh(ctx, onUpdate))
+		if u.refresh(ctx, onUpdate) {
+			failures = 0
+		} else {
+			failures = afterFailure(failures)
+		}
+		timer.Reset(u.schedule(u.wait(failures)))
 	}
 }
 
-// refresh runs one check and returns how long to wait for the next one.
-func (u *Updater) refresh(ctx context.Context, onUpdate func() error) time.Duration {
+// schedule publishes the time of the next check for NextCheck.
+func (u *Updater) schedule(delay time.Duration) time.Duration {
+	u.next.Store(time.Now().Add(delay).UnixNano())
+	return delay
+}
+
+// NextCheck returns when Run checks next, the zero time while it is idle.
+func (u *Updater) NextCheck() time.Time {
+	next := u.next.Load()
+	if next == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, next)
+}
+
+// afterFailure counts a failed check and starts over after the whole Interval.
+func afterFailure(failures int) int {
+	if failures > maxRetries {
+		return 1
+	}
+	return failures + 1
+}
+
+// wait returns the delay after the given number of failed checks in a row.
+func (u *Updater) wait(failures int) time.Duration {
+	switch {
+	case failures == 0:
+		return u.nextRefresh()
+	case failures <= maxRetries:
+		return u.retryDelay()
+	default:
+		return u.Interval
+	}
+}
+
+// refresh runs one check and reports whether it succeeded.
+func (u *Updater) refresh(ctx context.Context, onUpdate func() error) bool {
 	changed, updateErr := u.Update(ctx)
 	if updateErr != nil {
 		slog.Error("GeoIP update failed", "error", updateErr)
@@ -163,16 +220,12 @@ func (u *Updater) refresh(ctx context.Context, onUpdate func() error) time.Durat
 	if changed {
 		if err := onUpdate(); err != nil {
 			slog.Error("reloading GeoIP databases failed", "error", err)
-			return u.retryDelay()
+			return false
 		}
 		slog.Info("GeoIP databases updated")
 	}
 
-	if updateErr != nil {
-		return u.retryDelay()
-	}
-
-	return u.nextRefresh()
+	return updateErr == nil
 }
 
 // retryDelay never exceeds Interval, so a short Interval keeps its pace.

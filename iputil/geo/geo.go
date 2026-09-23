@@ -166,15 +166,15 @@ func (d *Database) ASN(addr netip.Addr) (ASN, error) {
 	}, nil
 }
 
-// HasCity reports whether a city database is loaded.
-func (d *Database) HasCity() bool {
+// CityLoaded reports whether the city database file is open.
+func (d *Database) CityLoaded() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.city != nil
 }
 
-// HasASN reports whether an ASN database is loaded.
-func (d *Database) HasASN() bool {
+// ASNLoaded reports whether the ASN database file is open.
+func (d *Database) ASNLoaded() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.asn != nil

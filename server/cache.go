@@ -27,9 +27,9 @@ type cacheEntry struct {
 
 // cacheStats is a snapshot of the cache for the debug handler.
 type cacheStats struct {
-	Capacity  int
-	Size      int
-	Evictions uint64
+	Size      int    `json:"size"`
+	Capacity  int    `json:"capacity"`
+	Evictions uint64 `json:"evictions"`
 }
 
 // NewCache returns an empty cache. A capacity below zero counts as zero.
