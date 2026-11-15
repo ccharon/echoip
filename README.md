@@ -209,25 +209,35 @@ downloads per day, so a finer interval buys nothing and a coarser one such as
 `-T` takes CIDR notation or a single address. A network with host bits set is
 refused rather than widened, so `-T 10.1.2.3/8` exits and names `10.0.0.0/8`.
 
+`X-Forwarded-For` lists one address per hop, each proxy appending on the
+right. With `-T` it is read from the right, across all its header lines, and
+the first entry outside `-T` is the client. An entry that is not an address is
+refused with `400`. When every entry is inside `-T` the header counts as
+absent. Without `-T` the first entry is taken. Other headers are read as one
+address.
+
 ## Security
 
 The service answers unauthenticated requests from anyone.
 
 | Measure | Effect |
 | --- | --- |
-| The service opens no outbound connections | It answers from the GeoIP databases only, so a caller cannot make it reach an address of their choosing. |
+| A caller cannot aim the service at an address | It answers from the GeoIP databases and connects to nothing a caller names. With `-r` it asks its own resolver for the hostname, and the updater only reaches MaxMind. |
 | Only public addresses are looked up | An address from `?ip=` or from a trusted header is refused with `400` unless it is globally reachable. The address the connection came from is always answered for. |
 | Security headers on every response | `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cache-Control: no-store`. |
 | Content Security Policy by hash | Inline script and style are allowed by their SHA-256 hash rather than by `unsafe-inline`. |
 | Database downloads are verified | Each archive is checked against the SHA-256 checksum MaxMind publishes for it. |
 | Requests are bounded | Headers are refused at 12 KiB, the body of `/debug/cache/resize` at 32 bytes, and an error quotes at most 128 characters of what the caller sent. |
+| Reverse lookups are bounded | With `-r`, at most 64 run at once, each for at most two seconds. A request over that is answered without the hostname, which is not cached. |
 | The container runs as an unprivileged user | UID 65532, with a read-only root filesystem, no capabilities and `no-new-privileges`. |
 | The credentials never reach a log | They are read from the environment and sent in an `Authorization` header, and errors are stripped of the request URL. |
 | Refused requests are logged | Every 4xx and 5xx is written as a `key=value` line with the peer address, the address a trusted proxy reported, the method, the target and the reason. Values are quoted where needed and cut at 128 characters. |
 
-Set `-H` only for headers the proxy overwrites, otherwise a caller picks the
-address they are shown data for. `-T` narrows that to the networks the proxy
-connects from.
+Without `-T`, set `-H` only for headers the proxy overwrites, otherwise a
+caller picks the address they are shown data for. With `-T`, only peers in
+those networks are believed, and `-H X-Forwarded-For` is also safe behind a
+proxy that appends to the header, as long as every proxy in the chain is listed
+in `-T`. A proxy missing from `-T` is reported as the client.
 
 `-P` registers handlers below `/debug` that are unauthenticated.
 `/debug/pprof/heap` hands out memory contents, which include the credentials.
