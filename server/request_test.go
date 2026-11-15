@@ -226,6 +226,99 @@ func TestTrustedProxies(t *testing.T) {
 	}
 }
 
+// With TrustedProxies, X-Forwarded-For is read from the right and the first
+// entry outside them wins, so a client cannot prepend an address of its own.
+func TestForwardedForWithTrustedProxies(t *testing.T) {
+	trusted := []string{"10.0.0.0/8", "2001:db8::/32"}
+	tests := []struct {
+		name    string
+		peer    string
+		trusted []string
+		headers []string
+		lines   []string
+		out     string
+	}{
+		{"spoofed leftmost entry", "10.0.0.2:1234", trusted, nil, []string{"8.8.8.8, 1.3.3.7"}, "1.3.3.7"},
+		{"all proxies trusted", "10.0.0.2:1234", trusted, nil, []string{"8.8.8.8, 1.3.3.7, 10.0.0.5, 10.0.0.9"}, "1.3.3.7"},
+		{"inner proxy not trusted", "10.0.0.2:1234", trusted, nil, []string{"1.3.3.7, 9.9.9.9, 10.0.0.9"}, "9.9.9.9"},
+		{"several header lines", "10.0.0.2:1234", trusted, nil, []string{"8.8.8.8", "1.3.3.7", "10.0.0.9"}, "1.3.3.7"},
+		{"several lines, client in the first", "10.0.0.2:1234", trusted, nil, []string{"1.3.3.7", "10.0.0.9, 10.0.0.5"}, "1.3.3.7"},
+		{"entry with a port", "10.0.0.2:1234", trusted, nil, []string{"8.8.8.8, 1.3.3.7:4711, 10.0.0.9:80"}, "1.3.3.7"},
+		{"IPv6 entries", "[2001:db8::1]:1234", trusted, nil, []string{"8.8.8.8, 2606:4700:4700::1111, [2001:db8::5]:443"}, "2606:4700:4700::1111"},
+		{"IPv4-mapped entries", "10.0.0.2:1234", trusted, nil, []string{"8.8.8.8, ::ffff:1.3.3.7, ::ffff:10.0.0.9"}, "1.3.3.7"},
+		{"all entries trusted fall back to the peer", "10.0.0.2:1234", trusted, nil, []string{"10.0.0.5, 10.0.0.9"}, "10.0.0.2"},
+		{"all entries trusted fall back to the next header", "10.0.0.2:1234", trusted, []string{"X-Forwarded-For", "X-Real-IP"}, []string{"10.0.0.5, 10.0.0.9"}, "4.2.4.2"},
+		{"blank header falls back to the peer", "10.0.0.2:1234", trusted, nil, []string{" "}, "10.0.0.2"},
+		{"untrusted peer ignores the header", "203.0.113.9:1234", trusted, nil, []string{"8.8.8.8, 1.3.3.7"}, "203.0.113.9"},
+		{"without a list the first entry is used", "10.0.0.2:1234", nil, nil, []string{"8.8.8.8, 1.3.3.7"}, "8.8.8.8"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &Server{cfg: Config{IPHeaders: tt.headers, TrustedProxies: prefixes(tt.trusted)}}
+			if tt.headers == nil {
+				server.cfg.IPHeaders = []string{"X-Forwarded-For"}
+			}
+			r := &http.Request{
+				RemoteAddr: tt.peer,
+				Header:     http.Header{"X-Forwarded-For": tt.lines, "X-Real-Ip": {"4.2.4.2"}},
+				URL:        &url.URL{Path: "/"},
+			}
+
+			addr, e := server.ipFromRequest(r)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if want := netip.MustParseAddr(tt.out); addr != want {
+				t.Errorf("expected %s, got %s", want, addr)
+			}
+		})
+	}
+}
+
+// An entry that is no address stops the walk, so the request is refused rather
+// than answered for whatever the client put further left.
+func TestForwardedForRefusesInvalidEntry(t *testing.T) {
+	tests := []struct {
+		chain  string
+		client string
+	}{
+		{"8.8.8.8, garbage, 10.0.0.9", "garbage"},
+		{"8.8.8.8, 1.3.3.7 junk, 10.0.0.9", "1.3.3.7 junk"},
+		{"8.8.8.8, , 10.0.0.9", "8.8.8.8, , 10.0.0.9"},
+		{"8.8.8.8,", "8.8.8.8,"},
+	}
+
+	for _, tt := range tests {
+		server := &Server{cfg: Config{IPHeaders: []string{"X-Forwarded-For"}, TrustedProxies: prefixes([]string{"10.0.0.0/8"})}}
+		r := &http.Request{
+			RemoteAddr: "10.0.0.2:1234",
+			Header:     http.Header{"X-Forwarded-For": {tt.chain}},
+			URL:        &url.URL{Path: "/"},
+		}
+
+		addr, e := server.ipFromRequest(r)
+		if e == nil {
+			t.Fatalf("%q: expected an error, got %s", tt.chain, addr)
+		}
+		if e.problem != invalidAddress {
+			t.Errorf("%q: expected %s, got %s", tt.chain, invalidAddress.slug, e.problem.slug)
+		}
+		// logRefused reports the value the request was refused for.
+		if got := server.forwarded(r, netip.MustParseAddr("10.0.0.2")); got != tt.client {
+			t.Errorf("%q: forwarded returned %q, expected %q", tt.chain, got, tt.client)
+		}
+	}
+}
+
+func prefixes(ss []string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range ss {
+		out = append(out, netip.MustParsePrefix(s))
+	}
+	return out
+}
+
 // A value that is no address is told apart from an address that is not public,
 // and the value is quoted so a newline in it stays visible.
 func TestIPFromRequestRefusesInvalid(t *testing.T) {

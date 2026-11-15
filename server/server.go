@@ -57,6 +57,14 @@ const (
 // request is refused at 12 KiB.
 const maxHeaderBytes = 8 << 10
 
+// maxLookups caps the reverse lookups in flight. ?ip= lets a caller name any
+// public address, so without a cap each request could hold a resolver query
+// for up to its two second deadline. A lookup usually answers in tens of
+// milliseconds, so 64 at once is over a thousand fresh addresses per second,
+// far beyond normal use. Over the cap the hostname is left out rather than
+// queued.
+const maxLookups = 64
+
 // Config holds the options that stay fixed while the server runs.
 type Config struct {
 	// IPHeaders are trusted for the remote address, in the order given.
@@ -94,12 +102,14 @@ type Server struct {
 	cfg   Config
 	cache *Cache
 	geo   GeoReader
+	// lookups holds a token for each reverse lookup in flight.
+	lookups chan struct{}
 }
 
 // New returns a server that looks up addresses in geoReader and keeps the
 // answers in cache.
 func New(cfg Config, geoReader GeoReader, cache *Cache) *Server {
-	return &Server{cfg: cfg, geo: geoReader, cache: cache}
+	return &Server{cfg: cfg, geo: geoReader, cache: cache, lookups: make(chan struct{}, maxLookups)}
 }
 
 // Handler returns the routes with the security and cache headers every

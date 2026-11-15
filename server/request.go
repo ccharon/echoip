@@ -109,8 +109,7 @@ func weight(params map[string]string) (float64, bool) {
 var qvalue = regexp.MustCompile(`^(?:0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)$`)
 
 // ipFromRequest returns the address to report, unmapped so that an IPv4
-// address has one representation. Only the first entry of X-Forwarded-For is
-// trusted, because a client may append to that header.
+// address has one representation.
 func (s *Server) ipFromRequest(r *http.Request) (netip.Addr, *appError) {
 	peer, peerErr := peerAddr(r)
 
@@ -130,17 +129,51 @@ func (s *Server) ipFromRequest(r *http.Request) (netip.Addr, *appError) {
 
 // forwarded returns the client address a trusted peer reported, as it was
 // sent, or nothing when the peer is not trusted or set none of IPHeaders.
+// X-Forwarded-For lists every hop: without TrustedProxies its first entry is
+// taken, which is only the client behind a proxy that overwrites the header;
+// with them, see lastUntrusted.
 func (s *Server) forwarded(r *http.Request, peer netip.Addr) string {
 	if !s.trusts(peer) {
 		return ""
 	}
 	for _, header := range s.cfg.IPHeaders {
-		value := r.Header.Get(header)
-		if http.CanonicalHeaderKey(header) == "X-Forwarded-For" {
-			value = firstForwardedFor(value)
+		var value string
+		switch {
+		case http.CanonicalHeaderKey(header) != "X-Forwarded-For":
+			value = r.Header.Get(header)
+		case len(s.cfg.TrustedProxies) == 0:
+			value = firstForwardedFor(r.Header.Get(header))
+		default:
+			value = s.lastUntrusted(r.Header.Values(header))
 		}
 		if value != "" {
 			return value
+		}
+	}
+	return ""
+}
+
+// lastUntrusted reads X-Forwarded-For from the right, where each proxy appends
+// the address it was connected from, and returns the first entry that is not a
+// trusted proxy: the address the outermost trusted proxy saw. Everything left
+// of it was sent by the client. Proxies join repeated lines in order, so all
+// lines count. An entry that is no address stops the walk and is returned, so
+// it is refused rather than skipped towards a value the client chose; an empty
+// entry has nothing to return, so the whole chain stands in for it. Nothing is
+// returned when every entry is a trusted proxy or the header is blank.
+func (s *Server) lastUntrusted(lines []string) string {
+	chain := strings.Join(lines, ",")
+	if strings.TrimSpace(chain) == "" {
+		return ""
+	}
+	entries := strings.Split(chain, ",")
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := strings.TrimSpace(entries[i])
+		if entry == "" {
+			return chain
+		}
+		if addr, ok := parseAddr(entry); !ok || !s.isTrustedProxy(addr) {
+			return entry
 		}
 	}
 	return ""
@@ -150,11 +183,13 @@ func (s *Server) forwarded(r *http.Request, peer netip.Addr) string {
 // TrustedProxies every peer is believed, which is what a service behind a
 // proxy that always sets the header needs.
 func (s *Server) trusts(peer netip.Addr) bool {
-	if len(s.cfg.TrustedProxies) == 0 {
-		return true
-	}
+	return len(s.cfg.TrustedProxies) == 0 || s.isTrustedProxy(peer)
+}
+
+// isTrustedProxy reports whether addr lies in TrustedProxies.
+func (s *Server) isTrustedProxy(addr netip.Addr) bool {
 	for _, prefix := range s.cfg.TrustedProxies {
-		if prefix.Contains(peer) {
+		if prefix.Contains(addr) {
 			return true
 		}
 	}
@@ -198,6 +233,9 @@ func parseAddr(s string) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
+// firstForwardedFor takes the leftmost entry, which is what the client sent
+// unless the proxy overwrites the header. It serves only without
+// TrustedProxies, where nothing tells a proxy's entry from the client's.
 func firstForwardedFor(v string) string {
 	if sep := strings.Index(v, ","); sep != -1 {
 		v = v[:sep]

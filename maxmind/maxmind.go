@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -51,6 +52,10 @@ const (
 	// Bounds the extracted database. GeoLite2-City is around 70 MB.
 	maxDatabaseSize = 1 << 29
 
+	// Bounds the bytes read from the archive. It holds the database, which
+	// gzip barely grows when it cannot shrink it, and a few small text files.
+	maxArchiveSize = maxDatabaseSize + 1<<20
+
 	defaultTimeout = 10 * time.Minute
 
 	// Bounds the checksum body, which holds one hash and a file name.
@@ -81,9 +86,19 @@ type Updater struct {
 
 	// endpoint replaces defaultEndpoint in tests.
 	endpoint string
+	// archiveLimit replaces maxArchiveSize in tests.
+	archiveLimit int64
 
 	// next is the time of the next check in Unix nanoseconds, zero while idle.
 	next atomic.Int64
+
+	// failed records whether the last Update failed, so Run can tell a caller
+	// that has just tried from one that has not.
+	failed atomic.Bool
+
+	// unusable holds the editions whose file is on disk but does not open.
+	mu       sync.Mutex
+	unusable map[string]bool
 }
 
 // Scheduled reports whether there are databases to check periodically.
@@ -96,18 +111,44 @@ func (u *Updater) Enabled() bool {
 	return u.Scheduled() && u.AccountID != "" && u.LicenseKey != ""
 }
 
-// Stale reports whether any database is missing or older than Interval.
+// Stale reports whether any database is missing, unusable or older than
+// Interval.
 func (u *Updater) Stale() bool {
 	return u.oldest() >= u.Interval
 }
 
+// Invalidate marks the file of an edition as unusable until it has been
+// downloaded again. Its modification time says nothing about its content after
+// a crash, so the next download leaves out the condition, which MaxMind would
+// answer with 304 and leave the file broken for good.
+func (u *Updater) Invalidate(edition string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.unusable == nil {
+		u.unusable = make(map[string]bool)
+	}
+	u.unusable[edition] = true
+}
+
+func (u *Updater) isUnusable(edition string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.unusable[edition]
+}
+
+func (u *Updater) repaired(edition string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	delete(u.unusable, edition)
+}
+
 // oldest returns the age of the database that was written longest ago. A
-// missing database counts as infinitely old.
+// missing or unusable database counts as infinitely old.
 func (u *Updater) oldest() time.Duration {
 	oldest := time.Duration(0)
-	for _, path := range u.Databases {
+	for edition, path := range u.Databases {
 		fi, err := os.Stat(path)
-		if err != nil {
+		if err != nil || u.isUnusable(edition) {
 			return time.Duration(math.MaxInt64)
 		}
 		if age := time.Since(fi.ModTime()); age > oldest {
@@ -130,6 +171,12 @@ func (u *Updater) nextRefresh() time.Duration {
 // changed. A database that MaxMind has not rebuilt since the last check is
 // left alone.
 func (u *Updater) Update(ctx context.Context) (bool, error) {
+	changed, err := u.update(ctx)
+	u.failed.Store(err != nil)
+	return changed, err
+}
+
+func (u *Updater) update(ctx context.Context) (bool, error) {
 	changed := false
 	for _, edition := range slices.Sorted(maps.Keys(u.Databases)) {
 		updated, err := u.download(ctx, edition, u.Databases[edition])
@@ -142,18 +189,24 @@ func (u *Updater) Update(ctx context.Context) (bool, error) {
 }
 
 // Run checks the databases every Interval until ctx is done and calls onUpdate
-// after new data. Databases still stale at the start count as a failed check,
-// because the caller has checked them once already.
+// after new data. Stale databases are checked right away, unless the last
+// Update failed: then that attempt counts as the first failed check, so a
+// caller that has just tried does not try again at once.
 func (u *Updater) Run(ctx context.Context, onUpdate func() error) {
 	if !u.Scheduled() {
 		return
 	}
 
 	failures := 0
-	if u.Stale() {
+	delay := u.nextRefresh()
+	switch {
+	case u.failed.Load():
 		failures = 1
+		delay = u.wait(failures)
+	case u.Stale():
+		delay = 0
 	}
-	timer := time.NewTimer(u.schedule(u.wait(failures)))
+	timer := time.NewTimer(u.schedule(delay))
 	defer timer.Stop()
 	defer u.next.Store(0)
 
@@ -246,8 +299,9 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 	}
 
 	// The modification time of the file on disk is the last time this edition
-	// was confirmed current, which is what the condition compares against.
-	if fi, err := os.Stat(path); err == nil {
+	// was confirmed current, which is what the condition compares against. An
+	// unusable file is fetched again whatever its age.
+	if fi, err := os.Stat(path); err == nil && !u.isUnusable(edition) {
 		req.Header.Set("If-Modified-Since", fi.ModTime().UTC().Format(http.TimeFormat))
 	}
 
@@ -268,8 +322,9 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 	// The database is put next to its destination and only moved into place
 	// once the archive it came from matches the checksum MaxMind publishes for
 	// it.
+	body := &boundedReader{r: resp.Body, limit: cmp.Or(u.archiveLimit, maxArchiveSize)}
 	sum := sha256.New()
-	tmp, err := extract(io.TeeReader(resp.Body, sum), edition+".mmdb", path)
+	tmp, err := extract(io.TeeReader(body, sum), edition+".mmdb", path)
 	if err != nil {
 		return false, err
 	}
@@ -277,7 +332,7 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 
 	// The checksum covers the whole archive, and extract stops at the entry it
 	// wants.
-	if _, err := io.Copy(sum, resp.Body); err != nil {
+	if _, err := io.Copy(sum, body); err != nil {
 		return false, withoutURL(err)
 	}
 
@@ -285,7 +340,35 @@ func (u *Updater) download(ctx context.Context, edition, path string) (bool, err
 		return false, err
 	}
 
-	return true, os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return false, err
+	}
+	u.repaired(edition)
+
+	// Without this the rename may not survive a crash. The new file is in
+	// place either way.
+	return true, syncDir(filepath.Dir(path))
+}
+
+// boundedReader fails once more than limit bytes have been read. Cutting the
+// archive short instead would surface as a puzzling checksum mismatch.
+type boundedReader struct {
+	r     io.Reader
+	limit int64
+	read  int64
+}
+
+func (b *boundedReader) Read(p []byte) (int, error) {
+	// One byte beyond the limit tells a larger body from one that ends there.
+	if left := b.limit + 1 - b.read; int64(len(p)) > left {
+		p = p[:left]
+	}
+	n, err := b.r.Read(p)
+	b.read += int64(n)
+	if b.read > b.limit {
+		return n, fmt.Errorf("archive is larger than the %d byte limit", b.limit)
+	}
+	return n, err
 }
 
 // request builds an authenticated GET for one file of an edition. The
@@ -386,6 +469,7 @@ func writeTemp(path string, r io.Reader) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
+	removeTemps(path)
 
 	f, err := os.CreateTemp(dir, filepath.Base(path)+".*")
 	if err != nil {
@@ -394,6 +478,13 @@ func writeTemp(path string, r io.Reader) (string, error) {
 	tmp := f.Name()
 
 	if _, err := io.Copy(f, r); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	// The rename that follows must not put a file in place whose content is
+	// still in the page cache, or a crash leaves a fresh but empty database.
+	if err := fsync(f); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return "", err
@@ -408,4 +499,38 @@ func writeTemp(path string, r io.Reader) (string, error) {
 	}
 
 	return tmp, nil
+}
+
+// fsync is replaced in tests to see what is synced.
+var fsync = (*os.File).Sync
+
+// syncDir makes a rename in dir durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = d.Close() }()
+	return fsync(d)
+}
+
+// removeTemps removes what writeTemp left beside path when the process died
+// during a download. It only touches names os.CreateTemp gives for that path,
+// the base name, a dot and a random number.
+func removeTemps(path string) {
+	dir, prefix := filepath.Dir(path), filepath.Base(path)+"."
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		random, ok := strings.CutPrefix(e.Name(), prefix)
+		if ok && e.Type().IsRegular() && isDigits(random) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+func isDigits(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
 }

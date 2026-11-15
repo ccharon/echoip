@@ -54,9 +54,12 @@ func (s *Server) newResponse(r *http.Request, hostname bool) (Response, *appErro
 	response, cached := s.cache.get(addr)
 	if !cached {
 		complete := hostname || s.cfg.LookupAddr == nil
-		response = s.lookup(r.Context(), addr, complete)
-		// A client that left may have cut the reverse lookup short.
-		if complete && r.Context().Err() == nil {
+		var skipped bool
+		response, skipped = s.lookup(r.Context(), addr, complete)
+		// A client that left may have cut the reverse lookup short, and a
+		// skipped one would leave the hostname out for as long as the entry
+		// lives.
+		if complete && !skipped && r.Context().Err() == nil {
 			s.cache.set(addr, response)
 		}
 	}
@@ -70,8 +73,9 @@ func (s *Server) newResponse(r *http.Request, hostname bool) (Response, *appErro
 
 // lookup gathers what the databases and, with hostname, the resolver know
 // about addr. A lookup that fails leaves its fields empty, which is what a
-// missing database gives as well.
-func (s *Server) lookup(ctx context.Context, addr netip.Addr, hostname bool) Response {
+// missing database gives as well. skipped reports a reverse lookup that did
+// not run because maxLookups were in flight.
+func (s *Server) lookup(ctx context.Context, addr netip.Addr, hostname bool) (response Response, skipped bool) {
 	// An address the database does not hold is no error, so a failure here
 	// means the file itself is unreadable and the operator wants to know.
 	city, err := s.geo.City(addr)
@@ -85,7 +89,7 @@ func (s *Server) lookup(ctx context.Context, addr netip.Addr, hostname bool) Res
 
 	var name string
 	if hostname && s.cfg.LookupAddr != nil {
-		name, _ = s.cfg.LookupAddr(ctx, addr)
+		name, skipped = s.lookupAddr(ctx, addr)
 	}
 
 	var asnumber string
@@ -108,5 +112,20 @@ func (s *Server) lookup(ctx context.Context, addr netip.Addr, hostname bool) Res
 		ASN:        asnumber,
 		ASNOrg:     asn.AutonomousSystemOrganization,
 		Hostname:   name,
+	}, skipped
+}
+
+// lookupAddr resolves the hostname of addr unless maxLookups are in flight.
+// A saturated request is not logged, since a caller could flood the log with
+// them; the missing hostname is the same as when the resolver fails.
+func (s *Server) lookupAddr(ctx context.Context, addr netip.Addr) (name string, skipped bool) {
+	select {
+	case s.lookups <- struct{}{}:
+	default:
+		return "", true
 	}
+	defer func() { <-s.lookups }()
+
+	name, _ = s.cfg.LookupAddr(ctx, addr)
+	return name, false
 }
