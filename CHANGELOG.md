@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.6 - 2026-11-15
 
 ### Security
 
@@ -25,6 +25,10 @@
 - `maxmind.Updater` gains `Invalidate`. `Run` checks stale databases at once unless the last `Update` failed.
 - CI tests with the race detector, `make test-race` runs the same. Superseded pull request runs are cancelled.
 - The image build uses `-trimpath` and caches the module download. geoip2-golang 2.5.0, docker/login-action 4.8.0.
+
+## 2.0.5 - 2026-09-23
+
+### Changed
 
 - The field endpoints skip the reverse lookup, which they never report. With `-r` their answers stay out of the cache, so the next `/json` or page still gets the hostname.
 - `Retry-After` on the `503` from a field endpoint names the seconds until the updater's next attempt. It used to name a fixed 15 minutes. With `-u 0` and while a check is running, the header is left out.
