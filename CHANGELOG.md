@@ -4,7 +4,7 @@
 
 ### Security
 
-- Go 1.27.3 in `go.mod` and the Dockerfile. 1.27.1 carried GO-2026-6809 in `crypto/x509` and GO-2026-6617 in the HTTP/2 server, both reachable from this code.
+- Go 1.27.4 in `go.mod` and the Dockerfile. 1.27.1 carried GO-2026-6809 in `crypto/x509`, GO-2026-6617 in the HTTP/2 server and GO-2026-6859 in the HTTP/1 server, all reachable from this code.
 - With `-T`, `X-Forwarded-For` is read from the right: the first entry outside `-T` is the client, so a client can no longer pick its address by sending the header through a proxy that appends. List every proxy of the chain in `-T`, one that is missing is reported as the client. An entry that is no address is refused with `400`. Without `-T` the first entry is still taken.
 - Reverse lookups are capped at 64 in flight. A request over the cap is answered without the hostname instead of waiting, and that answer is not cached.
 - CI checks for known vulnerabilities every week, not only on a push. Its jobs get read-only permissions, timeouts and no persisted checkout credentials. A scheduled run never pushes the image.
