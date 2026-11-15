@@ -5,10 +5,13 @@ import (
 	"flag"
 	"io"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/ccharon/echoip/iputil/geo"
 	"github.com/ccharon/echoip/maxmind"
 )
 
@@ -218,6 +221,92 @@ func TestMissingCredential(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := missingCredential(tt.u); got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+type fakeDatabase struct {
+	city, asn bool
+	reloadErr error
+	reloads   int
+}
+
+func (f *fakeDatabase) CityLoaded() bool { return f.city }
+func (f *fakeDatabase) ASNLoaded() bool  { return f.asn }
+func (f *fakeDatabase) Reload() error {
+	f.reloads++
+	return f.reloadErr
+}
+
+// Only a configured database that did not open holds up the start.
+func TestUnloaded(t *testing.T) {
+	both := editions("city.mmdb", "asn.mmdb")
+
+	tests := []struct {
+		name      string
+		db        *fakeDatabase
+		databases map[string]string
+		want      []string
+	}{
+		{"all loaded", &fakeDatabase{city: true, asn: true}, both, nil},
+		{"city missing", &fakeDatabase{asn: true}, both, []string{maxmind.EditionCity}},
+		{"both missing", &fakeDatabase{}, both, []string{maxmind.EditionASN, maxmind.EditionCity}},
+		{"not configured", &fakeDatabase{}, editions("", "asn.mmdb"), []string{maxmind.EditionASN}},
+		{"nothing configured", &fakeDatabase{}, editions("", ""), nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unloaded(tt.db, tt.databases); !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A file that is there but holds no database counts as unloaded, so it is
+// fetched again rather than kept by its modification time.
+func TestUnloadedBrokenFile(t *testing.T) {
+	city := filepath.Join(t.TempDir(), "GeoLite2-City.mmdb")
+	if err := os.WriteFile(city, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := geo.Open(city, "")
+	if err == nil {
+		t.Fatal("expected the empty file to fail to open")
+	}
+	if got, want := unloaded(db, editions(city, "")), []string{maxmind.EditionCity}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+type fakeCache struct{ clears int }
+
+func (f *fakeCache) Clear() { f.clears++ }
+
+// Reload replaces the databases it can open even when another fails, so the
+// cache has to go in both cases.
+func TestReloaderClearsCache(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"success", nil},
+		{"partial", errors.New("asn missing")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &fakeDatabase{reloadErr: tt.err}
+			cache := &fakeCache{}
+
+			if err := reloader(db, cache)(); !errors.Is(err, tt.err) {
+				t.Errorf("got error %v, want %v", err, tt.err)
+			}
+			if db.reloads != 1 || cache.clears != 1 {
+				t.Errorf("got %d reloads and %d clears, want one each", db.reloads, cache.clears)
 			}
 		})
 	}

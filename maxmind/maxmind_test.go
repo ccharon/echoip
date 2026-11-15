@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -991,9 +993,18 @@ func TestWaitAfterFailures(t *testing.T) {
 	}
 }
 
-// A database missing at the start makes the first check Run schedules a retry.
+// An Update that failed before Run counts as the first failed check, so the
+// next attempt follows the retry schedule rather than coming at once.
 func TestNextCheck(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
 	u := &Updater{
+		endpoint:   srv.URL,
 		AccountID:  "12345",
 		LicenseKey: "secret",
 		Interval:   24 * time.Hour,
@@ -1001,6 +1012,9 @@ func TestNextCheck(t *testing.T) {
 	}
 	if !u.NextCheck().IsZero() {
 		t.Fatal("expected no next check before Run")
+	}
+	if _, err := u.Update(t.Context()); err == nil {
+		t.Fatal("expected the update to fail")
 	}
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1014,13 +1028,264 @@ func TestNextCheck(t *testing.T) {
 	for u.NextCheck().IsZero() && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if got := time.Until(u.NextCheck()); got <= 0 || got > retryInterval {
-		t.Errorf("expected the next check within %s, got %s", retryInterval, got)
+	if got := time.Until(u.NextCheck()); got < retryInterval-time.Minute || got > retryInterval {
+		t.Errorf("expected the next check in about %s, got %s", retryInterval, got)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Errorf("expected only the request of the failed Update, got %d", got)
 	}
 
 	cancel()
 	<-done
 	if !u.NextCheck().IsZero() {
 		t.Error("expected no next check after Run returned")
+	}
+}
+
+// Old databases that still open do not hold up the start, so Run has to check
+// them at once instead of after a retry delay.
+func TestRunChecksStaleDatabasesRightAway(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
+	defer srv.Close()
+
+	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
+	if err := os.WriteFile(path, []byte("old database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	u := &Updater{
+		endpoint:   srv.URL,
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   24 * time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	updated := make(chan struct{}, 1)
+	go u.Run(ctx, func() error {
+		updated <- struct{}{}
+		return nil
+	})
+
+	select {
+	case <-updated:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected the stale database to be checked right away")
+	}
+}
+
+// A file that is there but does not open may carry a fresh modification time,
+// so a conditional request would get 304 and leave it broken.
+func TestUpdateRefetchesInvalidatedDatabase(t *testing.T) {
+	var conditions []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		edition := requestedEdition(r)
+		data := editionArchive(t, edition)
+		if isChecksum(r) {
+			writeChecksum(w, edition, data)
+			return
+		}
+		conditions = append(conditions, r.Header.Get("If-Modified-Since"))
+		if r.Header.Get("If-Modified-Since") != "" {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	path := filepath.Join(t.TempDir(), "GeoLite2-ASN.mmdb")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	u := &Updater{
+		endpoint:   srv.URL,
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+
+	if u.Stale() {
+		t.Fatal("expected the fresh file to count as current before Invalidate")
+	}
+	u.Invalidate(EditionASN)
+	if !u.Stale() {
+		t.Error("expected an invalidated database to be stale")
+	}
+
+	changed, err := u.Update(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Error("expected the database to be replaced")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := EditionASN + " data"; string(got) != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	// Once repaired, the edition is checked conditionally again.
+	if u.Stale() {
+		t.Error("expected the repaired database to be current")
+	}
+	if _, err := u.Update(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(conditions) != 2 || conditions[0] != "" || conditions[1] == "" {
+		t.Errorf("expected an unconditional and then a conditional request, got %q", conditions)
+	}
+}
+
+// The database and the rename that puts it in place both reach the disk, so a
+// crash does not leave a fresh looking but empty file.
+func TestUpdateSyncsDatabase(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
+	defer srv.Close()
+
+	var synced []string
+	defer func(orig func(*os.File) error) { fsync = orig }(fsync)
+	fsync = func(f *os.File) error {
+		synced = append(synced, f.Name())
+		return f.Sync()
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "GeoLite2-ASN.mmdb")
+	u := &Updater{
+		endpoint:   srv.URL,
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: path},
+	}
+	if _, err := u.Update(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(synced) != 2 {
+		t.Fatalf("expected the file and the directory to be synced, got %q", synced)
+	}
+	if filepath.Dir(synced[0]) != dir || !strings.HasPrefix(filepath.Base(synced[0]), "GeoLite2-ASN.mmdb.") {
+		t.Errorf("expected the temporary file to be synced first, got %q", synced[0])
+	}
+	if synced[1] != dir {
+		t.Errorf("expected the directory to be synced after the rename, got %q", synced[1])
+	}
+}
+
+// A download that died halfway leaves its temporary file behind. The next one
+// clears those of its own database and nothing else.
+func TestUpdateRemovesLeftoverTempFiles(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(serveMaxmind(t)))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	keep := []string{
+		"GeoLite2-ASN.mmdb",
+		"GeoLite2-ASN.mmdb.bak",
+		"GeoLite2-ASN.mmdb.12x",
+		"GeoLite2-ASN.mmdb.",
+		"GeoLite2-City.mmdb.123456",
+		"other.123456",
+	}
+	leftovers := []string{"GeoLite2-ASN.mmdb.123456", "GeoLite2-ASN.mmdb.4294967295"}
+	for _, name := range append(slices.Clone(keep), leftovers...) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	u := &Updater{
+		endpoint:   srv.URL,
+		AccountID:  "12345",
+		LicenseKey: "secret",
+		Interval:   time.Hour,
+		Databases:  map[string]string{EditionASN: filepath.Join(dir, "GeoLite2-ASN.mmdb")},
+	}
+	// The existing database is broken, so it is fetched rather than kept by a
+	// 304.
+	u.Invalidate(EditionASN)
+	if _, err := u.Update(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range entries {
+		got = append(got, e.Name())
+	}
+	slices.Sort(keep)
+	if !slices.Equal(got, keep) {
+		t.Errorf("got %q, want %q", got, keep)
+	}
+}
+
+// The archive is bounded as a whole, also in the entries extract skips and
+// in what follows the database.
+func TestUpdateRejectsOversizedArchive(t *testing.T) {
+	const limit = 64 << 10
+
+	// Random bytes, so gzip cannot shrink them below the limit.
+	noise := make([]byte, 2*limit)
+	_, _ = rand.Read(noise)
+
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"skipped entry", archive(t, map[string]string{
+			EditionASN + "_20240101/COPYRIGHT.txt":     string(noise),
+			EditionASN + "_20240101/GeoLite2-ASN.mmdb": "database",
+		})},
+		{"trailing data", append(editionArchive(t, EditionASN), noise...)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if isChecksum(r) {
+					writeChecksum(w, EditionASN, tt.data)
+					return
+				}
+				_, _ = w.Write(tt.data)
+			}))
+			defer srv.Close()
+
+			dir := t.TempDir()
+			u := &Updater{
+				endpoint:     srv.URL,
+				AccountID:    "12345",
+				LicenseKey:   "secret",
+				Interval:     time.Hour,
+				Databases:    map[string]string{EditionASN: filepath.Join(dir, "GeoLite2-ASN.mmdb")},
+				archiveLimit: limit,
+			}
+
+			_, err := u.Update(t.Context())
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), "limit") {
+				t.Errorf("expected the error to name the limit, got %q", err)
+			}
+			if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+				t.Errorf("expected nothing to be written, got %v", entries)
+			}
+		})
 	}
 }

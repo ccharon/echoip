@@ -175,13 +175,6 @@ func run(opts *options) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if updater.Enabled() && updater.Stale() {
-		slog.Info("checking GeoIP databases")
-		if _, err := updater.Update(ctx); err != nil {
-			slog.Error("GeoIP update failed", "error", err)
-		}
-	}
-
 	// A missing or broken database only disables the lookups that need it.
 	geoReader, err := geo.Open(opts.cityFile, opts.asnFile)
 	if err != nil {
@@ -189,18 +182,17 @@ func run(opts *options) error {
 	}
 
 	cache := server.NewCache(opts.cacheSize)
+	reload := reloader(geoReader, cache)
 	cfg := serverConfig(opts)
 
 	if updater.Enabled() {
+		// Databases that open are served while Run checks them in the
+		// background. Only those that do not are worth holding up the start.
+		if editions := unloaded(geoReader, updater.Databases); len(editions) > 0 {
+			fetch(ctx, updater, editions, reload)
+		}
 		slog.Info("checking GeoIP databases periodically", "interval", updater.Interval)
-		go updater.Run(ctx, func() error {
-			if err := geoReader.Reload(); err != nil {
-				return err
-			}
-			// Cached responses were built from the previous databases.
-			cache.Clear()
-			return nil
-		})
+		go updater.Run(ctx, reload)
 		cfg.NextCheck = updater.NextCheck
 	}
 
@@ -212,6 +204,57 @@ func run(opts *options) error {
 	}
 	slog.Info("shutdown complete")
 	return nil
+}
+
+// loadedReporter tells which databases are open.
+type loadedReporter interface {
+	CityLoaded() bool
+	ASNLoaded() bool
+}
+
+// unloaded returns the configured editions whose file did not open, because it
+// is missing or broken.
+func unloaded(db loadedReporter, databases map[string]string) []string {
+	var editions []string
+	if _, ok := databases[maxmind.EditionASN]; ok && !db.ASNLoaded() {
+		editions = append(editions, maxmind.EditionASN)
+	}
+	if _, ok := databases[maxmind.EditionCity]; ok && !db.CityLoaded() {
+		editions = append(editions, maxmind.EditionCity)
+	}
+	return editions
+}
+
+// fetch downloads before the server listens, so a fresh install comes up with
+// data. A file that is there and does not open is fetched whatever its age,
+// because its modification time may be all that survived a crash. A failure
+// leaves the server with what it has, and Run counts it as the first failed
+// check.
+func fetch(ctx context.Context, updater *maxmind.Updater, editions []string, reload func() error) {
+	for _, edition := range editions {
+		updater.Invalidate(edition)
+	}
+	slog.Info("downloading GeoIP databases", "editions", strings.Join(editions, ", "))
+	changed, err := updater.Update(ctx)
+	if err != nil {
+		slog.Error("GeoIP update failed", "error", err)
+	}
+	if changed {
+		if err := reload(); err != nil {
+			slog.Warn("GeoIP lookups are limited", "error", err)
+		}
+	}
+}
+
+// reloader returns the callback that loads new databases. Reload replaces what
+// it could open even when it reports an error for the rest, so the cache is
+// cleared either way: its responses were built from the previous databases.
+func reloader(db interface{ Reload() error }, cache interface{ Clear() }) func() error {
+	return func() error {
+		err := db.Reload()
+		cache.Clear()
+		return err
+	}
 }
 
 func prefixList(prefixes []netip.Prefix) string {
