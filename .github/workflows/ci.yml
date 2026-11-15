@@ -8,6 +8,23 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main, develop]
+  # A new vulnerability is published without any change here, so without this
+  # the check only notices when someone next pushes. Only the check job runs on
+  # a schedule, see the docker job.
+  schedule:
+    - cron: "17 5 * * 1"
+
+# The jobs only read the repository. The image is pushed with the Docker Hub
+# secrets, and provenance and sbom are attached to the image in the registry,
+# so nothing here writes to GitHub.
+permissions:
+  contents: read
+
+# A newer push to a pull request makes the older run pointless. Other runs are
+# never cancelled, because one of them may be publishing the image.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOCKER_IMAGE: ccharon/echoip
@@ -15,10 +32,14 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       # Pinned by commit, because a tag can be moved to other code.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes to the repository.
+          persist-credentials: false
 
       # govulncheck reports standard library vulnerabilities for the version it
       # runs with, so the check has to use the toolchain that builds the image.
@@ -37,8 +58,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The race detector is slower, so it runs here and not in make test.
       - name: Lint and test
-        run: make lint test
+        run: make lint test-race
 
       # Fails when a known vulnerability is reachable from this code. A
       # vulnerability in a dependency that nothing here calls is reported and
@@ -48,13 +70,18 @@ jobs:
 
   docker:
     needs: check
+    # A scheduled run is on main and would otherwise push the image again
+    # although nothing changed. It only has to look for vulnerabilities.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Tags are what the version comes from.
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

@@ -9,6 +9,10 @@ all: lint test install
 test:
 	go test ./...
 
+# Needs cgo and is slower, so CI runs it and make test stays quick.
+test-race:
+	go test -race ./...
+
 vet:
 	go vet ./...
 
@@ -46,13 +50,27 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 docker-build:
 	$(DOCKER) build --build-arg BUILDPLATFORM=$(BUILDPLATFORM) --build-arg VERSION=$(VERSION) -t $(DOCKER_IMAGE) .
 
+# The password comes from the environment and goes in through stdin, so it is
+# not part of any command line.
 docker-login:
-	$(DOCKER) login --username "$(DOCKER_USERNAME)" --password "$(DOCKER_PASSWORD)"
+	@printf '%s' "$$DOCKER_PASSWORD" | $(DOCKER) login --username "$(DOCKER_USERNAME)" --password-stdin
 
+# One shell block, so the container is stopped whatever the probe says and the
+# target fails when the service does not answer. Without credentials the binary
+# exits at startup, which the loop notices instead of waiting out the limit.
 docker-test:
-	$(eval CONTAINER=$(shell $(DOCKER) run --rm --detach --env MAXMIND_ACCOUNT_ID --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)))
-	$(eval DOCKER_PORT=$(shell $(DOCKER) port $(CONTAINER) | cut -d ":" -f 2))
-	curl -fsS -m 5 localhost:$(DOCKER_PORT) > /dev/null; $(DOCKER) stop $(CONTAINER)
+	@set -u; \
+	id=$$($(DOCKER) run --rm --detach --env MAXMIND_ACCOUNT_ID --env GEOIP_LICENSE_KEY --volume ./data:/opt/echoip/data --publish-all $(DOCKER_IMAGE)) || exit 1; \
+	ok=1; \
+	for i in $$(seq 1 30); do \
+		$(DOCKER) inspect -f '{{.State.Running}}' "$$id" 2>/dev/null | grep -q true || { echo "container exited"; $(DOCKER) logs "$$id" 2>&1 | tail -n 5; break; }; \
+		port=$$($(DOCKER) port "$$id" 8080/tcp 2>/dev/null | head -n 1 | cut -d: -f2); \
+		if [ -n "$$port" ] && curl -fsS -m 2 "localhost:$$port/health" > /dev/null 2>&1; then ok=0; break; fi; \
+		sleep 1; \
+	done; \
+	$(DOCKER) stop "$$id" > /dev/null 2>&1 || true; \
+	[ $$ok -eq 0 ] || echo "service did not answer on /health"; \
+	exit $$ok
 
 docker-push: docker-test docker-login
 	$(DOCKER) push $(DOCKER_IMAGE)
